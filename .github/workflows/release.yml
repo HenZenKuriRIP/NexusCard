@@ -1,0 +1,82 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag (e.g. v1.0.1). Leave empty to use ref name."
+        required: false
+        default: ""
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    name: Build Linux binaries & publish release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Resolve version
+        id: ver
+        run: |
+          if [[ -n "${{ inputs.tag }}" ]]; then
+            VER="${{ inputs.tag }}"
+          else
+            VER="${GITHUB_REF_NAME}"
+          fi
+          VER="${VER#v}"
+          echo "version=${VER}" >> "$GITHUB_OUTPUT"
+          echo "tag=v${VER}" >> "$GITHUB_OUTPUT"
+          echo "Building release v${VER}"
+
+      - name: Build release artifacts
+        env:
+          VERSION: ${{ steps.ver.outputs.version }}
+        run: bash scripts/build-release.sh
+
+      - name: Create / update GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${{ steps.ver.outputs.tag }}"
+          NOTES="## NexusCard ${TAG}
+
+          Pre-built Linux binaries for one-click install.
+
+          ### Assets
+          | File | Platform |
+          |------|----------|
+          | \`nexuscard-linux-amd64\` | Linux x86_64 / amd64 |
+          | \`nexuscard-linux-arm64\` | Linux aarch64 / arm64 |
+          | \`SHA256SUMS.txt\` | Checksums |
+
+          ### Install
+          \`\`\`bash
+          curl -fsSL https://raw.githubusercontent.com/HenZenKuriRIP/NexusCard/main/deploy/install.sh | sudo bash -s -- your.domain.com
+          \`\`\`
+
+          Or pin a version:
+          \`\`\`bash
+          curl -fsSL https://raw.githubusercontent.com/HenZenKuriRIP/NexusCard/main/deploy/install.sh | sudo VERSION=${TAG} bash -s -- your.domain.com
+          \`\`\`
+          "
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" dist/* --clobber
+            gh release edit "$TAG" --notes "$NOTES"
+          else
+            gh release create "$TAG" dist/* \
+              --title "NexusCard ${TAG}" \
+              --notes "$NOTES"
+          fi

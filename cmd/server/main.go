@@ -2,6 +2,7 @@ package main
 
 import (
 	"flag"
+	"fmt"
 	"log/slog"
 	"os"
 
@@ -11,9 +12,17 @@ import (
 	"github.com/HenZenKuriRIP/NexusCard/internal/service"
 )
 
+// Set via -ldflags "-X main.version=..."
+var version = "dev"
+
 func main() {
 	cfgPath := flag.String("config", "configs/config.example.yaml", "path to config yaml")
+	showVersion := flag.Bool("version", false, "print version and exit")
 	flag.Parse()
+	if *showVersion {
+		fmt.Println(version)
+		os.Exit(0)
+	}
 
 	cfg, err := config.Load(*cfgPath)
 	if err != nil {

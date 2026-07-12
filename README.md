@@ -58,21 +58,33 @@ Bill subject defaults to neutral **`Digital Goods`** (no plan/VPN names).
 
 ## One-click install (Linux + domain)
 
-On a Debian/Ubuntu (or similar) server, with DNS **A record** pointing to the host:
+On a Debian/Ubuntu (or RHEL-like) server, with DNS **A record** pointing to the host.
+
+Pre-built **Linux amd64 / arm64** binaries are published on [GitHub Releases](https://github.com/HenZenKuriRIP/NexusCard/releases). The install script **does not** install Go or compile from source — it detects the host arch and downloads the matching binary.
 
 ```bash
-# From the repository root
+# Recommended: pipe from main
+curl -fsSL https://raw.githubusercontent.com/HenZenKuriRIP/NexusCard/main/deploy/install.sh \
+  | sudo bash -s -- pay.example.com
+
+# Pin a release tag
+curl -fsSL https://raw.githubusercontent.com/HenZenKuriRIP/NexusCard/main/deploy/install.sh \
+  | sudo VERSION=v1.0.0 bash -s -- pay.example.com
+
+# From a local clone
 sudo bash deploy/install.sh pay.example.com
 ```
 
-The script will:
+The script walks through clear steps (with a short pause between each so the log is readable):
 
-1. Install dependencies (nginx, git, go toolchain if missing)
-2. Build the binary into `/opt/giftcard-platform` (NexusCard)
-3. Write production config + random secrets
-4. Install **systemd** service
-5. Configure **Nginx** reverse proxy
-6. Optionally obtain **Let's Encrypt** certificate via certbot
+1. Preflight — root, OS, arch (`linux/amd64` or `linux/arm64`), DNS hint  
+2. System packages — `curl`, `nginx`, optional `certbot` (**no Go / git / compiler**)  
+3. Download — fetch binary + SHA256 from GitHub Releases  
+4. Configuration — production YAML + random secrets  
+5. systemd — service user and unit  
+6. Nginx — reverse proxy to `127.0.0.1:8088`  
+7. HTTPS — optional Let's Encrypt via certbot  
+8. Final check — service + local healthz  
 
 After install:
 
@@ -84,6 +96,22 @@ Uninstall:
 
 ```bash
 sudo bash deploy/install.sh --uninstall
+# or: curl -fsSL .../install.sh | sudo bash -s -- --uninstall
+```
+
+### Release binaries
+
+| Asset | Platform |
+|-------|----------|
+| `nexuscard-linux-amd64` | x86_64 VPS |
+| `nexuscard-linux-arm64` | aarch64 / ARM64 |
+| `SHA256SUMS.txt` | checksums |
+
+Tag a version to trigger CI (`.github/workflows/release.yml`):
+
+```bash
+git tag v1.0.0 && git push origin v1.0.0
+# or build locally: VERSION=1.0.0 bash scripts/build-release.sh
 ```
 
 ---
