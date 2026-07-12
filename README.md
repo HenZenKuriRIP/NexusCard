@@ -1,11 +1,5 @@
 # NexusCard
 
-数字商品商城与支付收银台（支付宝 / K2Board giftcard 网关）。
-
-**仓库:** https://github.com/HenZenKuriRIP/NexusCard  
-**Releases:** https://github.com/HenZenKuriRIP/NexusCard/releases
-
----
 
 ## 一键安装
 
