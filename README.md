@@ -99,6 +99,15 @@ sudo bash deploy/install.sh --uninstall
 # or: curl -fsSL .../install.sh | sudo bash -s -- --uninstall
 ```
 
+Uninstall **keeps**:
+- Database & config under `/opt/giftcard-platform` (orders, products, admin, Alipay settings)
+- Let's Encrypt certs under `/etc/letsencrypt` (domain certificates are **not** deleted)
+
+Reinstall with the same domain will:
+- Reuse the existing DB and config (does not reset admin password / API secrets)
+- Detect a still-valid LE cert for that domain and **skip** certbot re-issue (only re-wire Nginx)
+- Optionally force renew if you choose “强制重新申请证书”
+
 ### Release binaries
 
 | Asset | Platform |

@@ -202,11 +202,114 @@ download_binary() {
   pause
 }
 
+# ── TLS helpers ─────────────────────────────────────────────────────────────
+# Return 0 if a non-expired Let's Encrypt cert for $1 already exists on disk.
+has_valid_cert() {
+  local domain="$1"
+  local live="/etc/letsencrypt/live/${domain}/fullchain.pem"
+  local key="/etc/letsencrypt/live/${domain}/privkey.pem"
+  [[ -f "$live" && -f "$key" ]] || return 1
+  if command -v openssl >/dev/null 2>&1; then
+    # Valid if not expiring within 1 day
+    openssl x509 -checkend 86400 -noout -in "$live" 2>/dev/null || return 1
+  fi
+  return 0
+}
+
+cert_expiry_info() {
+  local live="/etc/letsencrypt/live/${1}/fullchain.pem"
+  [[ -f "$live" ]] || return 0
+  if command -v openssl >/dev/null 2>&1; then
+    openssl x509 -enddate -noout -in "$live" 2>/dev/null | sed 's/notAfter=/到期: /' || true
+  fi
+}
+
+# Write Nginx site: HTTP-only, or HTTPS with existing LE certs.
+write_nginx_site() {
+  local domain="$1"
+  local with_ssl="${2:-0}"
+  local site="$3"
+
+  if [[ "$with_ssl" == "1" ]]; then
+    local ssl_opts="" ssl_dh=""
+    [[ -f /etc/letsencrypt/options-ssl-nginx.conf ]] \
+      && ssl_opts="    include /etc/letsencrypt/options-ssl-nginx.conf;"
+    [[ -f /etc/letsencrypt/ssl-dhparams.pem ]] \
+      && ssl_dh="    ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;"
+
+    cat > "$site" <<EOF
+# Managed by NexusCard install.sh — HTTP → HTTPS
+server {
+    listen 80;
+    listen [::]:80;
+    server_name ${domain};
+
+    location /.well-known/acme-challenge/ {
+        root /var/www/html;
+    }
+
+    location / {
+        return 301 https://\$host\$request_uri;
+    }
+}
+
+server {
+    listen 443 ssl http2;
+    listen [::]:443 ssl http2;
+    server_name ${domain};
+
+    ssl_certificate     /etc/letsencrypt/live/${domain}/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/${domain}/privkey.pem;
+${ssl_opts}
+${ssl_dh}
+
+    client_max_body_size 8m;
+
+    location / {
+        proxy_pass http://127.0.0.1:${LISTEN_PORT};
+        proxy_http_version 1.1;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+        proxy_read_timeout 60s;
+    }
+}
+EOF
+  else
+    cat > "$site" <<EOF
+# Managed by NexusCard install.sh — HTTP only (TLS later via certbot)
+server {
+    listen 80;
+    listen [::]:80;
+    server_name ${domain};
+
+    client_max_body_size 8m;
+
+    location / {
+        proxy_pass http://127.0.0.1:${LISTEN_PORT};
+        proxy_http_version 1.1;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+        proxy_read_timeout 60s;
+    }
+}
+EOF
+  fi
+}
+
 # ── uninstall ───────────────────────────────────────────────────────────────
+# Removes service + Nginx site only.
+# PRESERVES: INSTALL_DIR (DB + config), Let's Encrypt certs under /etc/letsencrypt
 do_uninstall() {
   banner
   echo -e "  ${YELLOW}${BOLD}卸载 ${SERVICE_NAME}${NC}"
   echo ""
+  info "策略: 仅移除服务与站点配置；数据库与域名证书一律保留"
+  pause
+
   info "停止并禁用 systemd 服务 …"
   systemctl stop "$SERVICE_NAME" 2>/dev/null || true
   systemctl disable "$SERVICE_NAME" 2>/dev/null || true
@@ -214,19 +317,49 @@ do_uninstall() {
   systemctl daemon-reload || true
   ok "服务已移除"
 
-  info "清理 Nginx 站点配置 …"
+  info "清理 Nginx 站点配置（不触碰证书文件）…"
   if [[ -f /etc/nginx/sites-enabled/giftcard-platform ]]; then
     rm -f /etc/nginx/sites-enabled/giftcard-platform /etc/nginx/sites-available/giftcard-platform
-    nginx -t && systemctl reload nginx || true
   fi
   rm -f /etc/nginx/conf.d/giftcard-platform.conf 2>/dev/null || true
-  ok "Nginx 配置已清理"
+  if command -v nginx >/dev/null 2>&1; then
+    nginx -t 2>/dev/null && systemctl reload nginx || true
+  fi
+  ok "Nginx 站点配置已清理"
 
   echo ""
-  warn "数据目录 ${INSTALL_DIR} 已保留（含数据库与配置）"
-  info "如需彻底删除:  rm -rf ${INSTALL_DIR}"
+  echo -e "  ${BOLD}已保留（重装可继续使用）:${NC}"
+  if [[ -d "$INSTALL_DIR" ]]; then
+    ok "数据目录: ${INSTALL_DIR}"
+    [[ -f "${INSTALL_DIR}/data/giftcard.db" ]] && ok "数据库:   ${INSTALL_DIR}/data/giftcard.db"
+    [[ -f "${INSTALL_DIR}/configs/config.yaml" ]] && ok "配置:     ${INSTALL_DIR}/configs/config.yaml"
+  else
+    warn "安装目录不存在: ${INSTALL_DIR}"
+  fi
+  if [[ -d /etc/letsencrypt/live ]]; then
+    ok "Let's Encrypt 证书目录: /etc/letsencrypt（未删除）"
+    # List lineages that look related / all live domains
+    local d
+    for d in /etc/letsencrypt/live/*/; do
+      [[ -d "$d" ]] || continue
+      local name; name="$(basename "$d")"
+      [[ "$name" == "README" ]] && continue
+      if has_valid_cert "$name"; then
+        ok "  证书 ${name} 有效  $(cert_expiry_info "$name")"
+      elif [[ -f "${d}fullchain.pem" ]]; then
+        warn "  证书 ${name} 存在但可能已过期"
+      fi
+    done
+  else
+    info "本机暂无 /etc/letsencrypt/live 证书"
+  fi
+
   echo ""
-  ok "卸载完成"
+  warn "不会自动删除数据库与证书。彻底清除请手动执行:"
+  info "  rm -rf ${INSTALL_DIR}"
+  info "  certbot delete --cert-name <domain>   # 仅当确认不再需要证书时"
+  echo ""
+  ok "卸载完成（可随时用同一域名重新安装，将复用库与证书）"
   exit 0
 }
 
@@ -238,26 +371,91 @@ banner
 
 DOMAIN="${1:-}"
 if [[ -z "$DOMAIN" ]]; then
-  read -r -p "  请输入域名 (例如 pay.example.com): " DOMAIN
+  # Prefer domain remembered from previous install
+  if [[ -f "${INSTALL_DIR}/configs/config.yaml" ]]; then
+    PREV_DOMAIN="$(sed -n 's/.*public_base_url:[[:space:]]*"https\?:\/\/\([^"/]*\)".*/\1/p' \
+      "${INSTALL_DIR}/configs/config.yaml" 2>/dev/null | head -1 || true)"
+  fi
+  if [[ -n "${PREV_DOMAIN:-}" ]]; then
+    read -r -p "  请输入域名 [回车=沿用 ${PREV_DOMAIN}]: " DOMAIN
+    DOMAIN="${DOMAIN:-$PREV_DOMAIN}"
+  else
+    read -r -p "  请输入域名 (例如 pay.example.com): " DOMAIN
+  fi
 fi
 [[ -n "$DOMAIN" ]] || die "域名不能为空"
 DOMAIN="${DOMAIN#http://}"; DOMAIN="${DOMAIN#https://}"; DOMAIN="${DOMAIN%%/*}"
 
-echo ""
-read -r -p "  是否申请 Let's Encrypt HTTPS？ [Y/n]: " WANT_SSL
-WANT_SSL="${WANT_SSL:-Y}"
+# Detect reinstall / existing assets up front
+REUSE_DB=0
+REUSE_CFG=0
+REUSE_CERT=0
+[[ -f "${INSTALL_DIR}/data/giftcard.db" ]] && REUSE_DB=1
+[[ -f "${INSTALL_DIR}/configs/config.yaml" ]] && REUSE_CFG=1
+has_valid_cert "$DOMAIN" && REUSE_CERT=1
 
-read -r -p "  管理员用户名 [admin]: " ADMIN_USER
-ADMIN_USER="${ADMIN_USER:-admin}"
-read -r -p "  管理员密码 [回车=随机生成]: " ADMIN_PASS
-if [[ -z "$ADMIN_PASS" ]]; then
-  ADMIN_PASS="$(rand_hex 8)"
-  info "已生成随机管理员密码"
+echo ""
+echo -e "  ${BOLD}检测到的已有数据${NC}"
+if [[ "$REUSE_DB" -eq 1 ]]; then
+  ok "数据库已存在 → 重装将保留订单/商品等数据"
+else
+  info "无历史数据库，将新建"
+fi
+if [[ "$REUSE_CFG" -eq 1 ]]; then
+  ok "配置已存在 → 重装将保留密钥与管理员设置"
+else
+  info "无历史配置，将生成新配置"
+fi
+if [[ "$REUSE_CERT" -eq 1 ]]; then
+  ok "域名 ${DOMAIN} 已有有效证书 → 不再重复申请  $(cert_expiry_info "$DOMAIN")"
+else
+  if [[ -f "/etc/letsencrypt/live/${DOMAIN}/fullchain.pem" ]]; then
+    warn "证书文件存在但已过期/即将过期 → 将尝试续期/重签"
+  else
+    info "本机尚无 ${DOMAIN} 的 Let's Encrypt 证书"
+  fi
+fi
+pause
+
+echo ""
+FORCE_RENEW=0
+if [[ "$REUSE_CERT" -eq 1 ]]; then
+  info "已有有效证书，默认跳过 certbot 申请"
+  read -r -p "  是否强制重新申请证书？ [y/N]: " FORCE_SSL
+  FORCE_SSL="${FORCE_SSL:-N}"
+  if [[ "${FORCE_SSL,,}" == "y" || "${FORCE_SSL,,}" == "yes" ]]; then
+    WANT_SSL="Y"
+    REUSE_CERT=0
+    FORCE_RENEW=1
+    info "将强制重新申请证书"
+  else
+    WANT_SSL="reuse"
+  fi
+else
+  read -r -p "  是否申请 Let's Encrypt HTTPS？ [Y/n]: " WANT_SSL
+  WANT_SSL="${WANT_SSL:-Y}"
 fi
 
-ADMIN_TOKEN="$(rand_hex 24)"
-JWT_SECRET="$(rand_hex 24)"
-API_SECRET="$(rand_hex 16)"
+# Admin credentials only when creating a brand-new config
+ADMIN_USER="admin"
+ADMIN_PASS=""
+ADMIN_TOKEN=""
+JWT_SECRET=""
+API_SECRET=""
+if [[ "$REUSE_CFG" -eq 0 ]]; then
+  read -r -p "  管理员用户名 [admin]: " ADMIN_USER
+  ADMIN_USER="${ADMIN_USER:-admin}"
+  read -r -p "  管理员密码 [回车=随机生成]: " ADMIN_PASS
+  if [[ -z "$ADMIN_PASS" ]]; then
+    ADMIN_PASS="$(rand_hex 8)"
+    info "已生成随机管理员密码"
+  fi
+  ADMIN_TOKEN="$(rand_hex 24)"
+  JWT_SECRET="$(rand_hex 24)"
+  API_SECRET="$(rand_hex 16)"
+else
+  info "沿用已有配置，不重置管理员密码与 API 密钥"
+fi
 
 echo ""
 echo -e "  ${BOLD}安装摘要${NC}"
@@ -265,7 +463,9 @@ info "域名:       https://${DOMAIN}"
 info "安装目录:   ${INSTALL_DIR}"
 info "监听地址:   127.0.0.1:${LISTEN_PORT}"
 info "Release:    ${VERSION}"
-info "管理员:     ${ADMIN_USER}"
+info "保留数据库: $([[ $REUSE_DB -eq 1 ]] && echo 是 || echo 否)"
+info "保留配置:   $([[ $REUSE_CFG -eq 1 ]] && echo 是 || echo 否)"
+info "证书策略:   $([[ $REUSE_CERT -eq 1 || "$WANT_SSL" == "reuse" ]] && echo "复用已有证书" || echo "$WANT_SSL")"
 pause
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -343,13 +543,50 @@ pause
 # ═══════════════════════════════════════════════════════════════════════════
 # [4] Configuration
 # ═══════════════════════════════════════════════════════════════════════════
-step 4 "写入生产配置"
+step 4 "写入 / 保留生产配置"
 
 mkdir -p "${INSTALL_DIR}/data" "${INSTALL_DIR}/configs"
 PUBLIC_URL="https://${DOMAIN}"
+CFG="${INSTALL_DIR}/configs/config.yaml"
 
-info "生成 config.yaml 与部署说明 …"
-cat > "${INSTALL_DIR}/configs/config.yaml" <<EOF
+if [[ "$REUSE_CFG" -eq 1 && -f "$CFG" ]]; then
+  info "检测到已有配置，保留密钥与业务设置 …"
+  # Only refresh public_base_url / listen so domain re-bind works after reinstall
+  if grep -q 'public_base_url:' "$CFG" 2>/dev/null; then
+    sed -i "s|public_base_url:.*|public_base_url: \"${PUBLIC_URL}\"|" "$CFG" 2>/dev/null \
+      || sed -i '' "s|public_base_url:.*|public_base_url: \"${PUBLIC_URL}\"|" "$CFG" 2>/dev/null || true
+  fi
+  if grep -q 'listen:' "$CFG" 2>/dev/null; then
+    sed -i "s|listen:.*|listen: \"127.0.0.1:${LISTEN_PORT}\"|" "$CFG" 2>/dev/null \
+      || sed -i '' "s|listen:.*|listen: \"127.0.0.1:${LISTEN_PORT}\"|" "$CFG" 2>/dev/null || true
+  fi
+  ok "已保留: ${CFG}"
+  [[ "$REUSE_DB" -eq 1 ]] && ok "已保留数据库: ${INSTALL_DIR}/data/giftcard.db"
+
+  cat > "${INSTALL_DIR}/README-DEPLOY.txt" <<EOF
+NexusCard deployment info (reinstall — config/DB preserved)
+===========================================================
+Release:    ${RELEASE_TAG}
+Platform:   ${PLATFORM_OS}/${PLATFORM_ARCH}
+Domain:     ${PUBLIC_URL}
+Shop:       ${PUBLIC_URL}/shop/
+Admin:      ${PUBLIC_URL}/admin/
+Health:     ${PUBLIC_URL}/healthz
+Alipay notify: ${PUBLIC_URL}/alipay/notify
+
+Config and admin credentials were kept from the previous install.
+See previous notes or login with your existing admin account.
+
+Binary:  ${INSTALL_DIR}/${BIN_NAME}
+Config:  ${CFG}
+DB:      ${INSTALL_DIR}/data/giftcard.db
+Logs:    journalctl -u ${SERVICE_NAME} -f
+EOF
+  chmod 600 "$CFG" "${INSTALL_DIR}/README-DEPLOY.txt" 2>/dev/null || true
+  ok "部署说明已更新（未重置密码）"
+else
+  info "生成全新 config.yaml 与部署说明 …"
+  cat > "$CFG" <<EOF
 # NexusCard production config (minimal).
 # Configure Alipay keys in Admin UI -> Payment (hot reload).
 
@@ -400,7 +637,7 @@ shop:
   order_ttl_min: 30
 EOF
 
-cat > "${INSTALL_DIR}/README-DEPLOY.txt" <<EOF
+  cat > "${INSTALL_DIR}/README-DEPLOY.txt" <<EOF
 NexusCard deployment info
 =========================
 Release:    ${RELEASE_TAG}
@@ -428,12 +665,13 @@ Next steps:
   4) Point K2 payment method giftcard to base_url above
 
 Binary:  ${INSTALL_DIR}/${BIN_NAME}
-Config:  ${INSTALL_DIR}/configs/config.yaml
+Config:  ${CFG}
 Logs:    journalctl -u ${SERVICE_NAME} -f
 EOF
-chmod 600 "${INSTALL_DIR}/configs/config.yaml" "${INSTALL_DIR}/README-DEPLOY.txt"
-ok "配置已写入 ${INSTALL_DIR}/configs/config.yaml"
-ok "部署说明: ${INSTALL_DIR}/README-DEPLOY.txt"
+  chmod 600 "$CFG" "${INSTALL_DIR}/README-DEPLOY.txt"
+  ok "配置已写入 ${CFG}"
+  ok "部署说明: ${INSTALL_DIR}/README-DEPLOY.txt"
+fi
 pause
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -492,26 +730,16 @@ if [[ ! -d /etc/nginx/sites-available ]]; then
   NGINX_SITE="/etc/nginx/conf.d/giftcard-platform.conf"
 fi
 
-info "写入站点: ${NGINX_SITE}"
-cat > "$NGINX_SITE" <<EOF
-server {
-    listen 80;
-    listen [::]:80;
-    server_name ${DOMAIN};
+# If we already have a valid cert, write full HTTPS site now (skip later re-issue)
+NGINX_SSL=0
+if [[ "$REUSE_CERT" -eq 1 || "$WANT_SSL" == "reuse" ]] && has_valid_cert "$DOMAIN"; then
+  NGINX_SSL=1
+  info "使用已有证书写入 HTTPS 站点配置 …"
+else
+  info "先写入 HTTP 站点（证书步骤再升级为 HTTPS）…"
+fi
 
-    client_max_body_size 8m;
-
-    location / {
-        proxy_pass http://127.0.0.1:${LISTEN_PORT};
-        proxy_http_version 1.1;
-        proxy_set_header Host \$host;
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto \$scheme;
-        proxy_read_timeout 60s;
-    }
-}
-EOF
+write_nginx_site "$DOMAIN" "$NGINX_SSL" "$NGINX_SITE"
 
 if [[ -d /etc/nginx/sites-enabled ]]; then
   ln -sfn "$NGINX_SITE" /etc/nginx/sites-enabled/giftcard-platform
@@ -522,51 +750,112 @@ info "nginx -t && reload …"
 nginx -t
 systemctl enable nginx >/dev/null 2>&1 || true
 systemctl reload nginx
-ok "Nginx: ${DOMAIN} → 127.0.0.1:${LISTEN_PORT}"
+if [[ "$NGINX_SSL" -eq 1 ]]; then
+  ok "Nginx HTTPS: ${DOMAIN} → 127.0.0.1:${LISTEN_PORT}（复用证书）"
+else
+  ok "Nginx HTTP: ${DOMAIN} → 127.0.0.1:${LISTEN_PORT}"
+fi
 pause
 
 # ═══════════════════════════════════════════════════════════════════════════
 # [7] TLS
 # ═══════════════════════════════════════════════════════════════════════════
-step 7 "HTTPS / Let's Encrypt"
+step 7 "HTTPS / Let's Encrypt（检测后决定是否申请）"
+
+apply_existing_cert() {
+  info "检测域名证书: /etc/letsencrypt/live/${DOMAIN}/"
+  if ! has_valid_cert "$DOMAIN"; then
+    return 1
+  fi
+  ok "证书已存在且有效，跳过 certbot 申请"
+  info "$(cert_expiry_info "$DOMAIN")"
+  write_nginx_site "$DOMAIN" 1 "$NGINX_SITE"
+  nginx -t && systemctl reload nginx
+  sed -i "s|public_base_url:.*|public_base_url: \"https://${DOMAIN}\"|" \
+    "${INSTALL_DIR}/configs/config.yaml" 2>/dev/null \
+    || sed -i '' "s|public_base_url:.*|public_base_url: \"https://${DOMAIN}\"|" \
+    "${INSTALL_DIR}/configs/config.yaml" 2>/dev/null || true
+  systemctl restart "$SERVICE_NAME" || true
+  ok "HTTPS 复用完成，未向 Let's Encrypt 发起新申请"
+  return 0
+}
+
+issue_new_cert() {
+  info "本机无有效证书（或用户强制重签），准备向 Let's Encrypt 申请 …"
+  info "探测 HTTP 健康检查 http://${DOMAIN}/healthz …"
+  local reachable=0 i
+  for i in 1 2 3 4 5 6 7 8; do
+    if curl -fsS -m 5 "http://${DOMAIN}/healthz" >/dev/null 2>&1; then
+      ok "HTTP 可达（第 ${i} 次探测）"
+      reachable=1
+      break
+    fi
+    info "等待服务就绪… (${i}/8)"
+    sleep 2
+  done
+  if [[ "$reachable" -ne 1 ]]; then
+    warn "暂时无法通过域名访问 /healthz（DNS 或防火墙可能未就绪）"
+    warn "仍将尝试申请证书；失败时可稍后手动执行 certbot"
+  fi
+
+  if ! command -v certbot >/dev/null 2>&1; then
+    warn "未安装 certbot；请手动配置 SSL"
+    return 1
+  fi
+
+  info "运行 certbot --nginx -d ${DOMAIN} …"
+  if certbot --nginx -d "$DOMAIN" --non-interactive --agree-tos \
+      --register-unsafely-without-email --redirect; then
+    ok "Let's Encrypt 证书已安装"
+    sed -i "s|public_base_url:.*|public_base_url: \"https://${DOMAIN}\"|" \
+      "${INSTALL_DIR}/configs/config.yaml" 2>/dev/null \
+      || sed -i '' "s|public_base_url:.*|public_base_url: \"https://${DOMAIN}\"|" \
+      "${INSTALL_DIR}/configs/config.yaml" 2>/dev/null || true
+    systemctl restart "$SERVICE_NAME" || true
+    return 0
+  fi
+  warn "certbot 失败。请确认 DNS A 记录指向本机，且 80/443 开放，然后执行:"
+  warn "  certbot --nginx -d ${DOMAIN} --redirect"
+  return 1
+}
 
 case "${WANT_SSL,,}" in
   n|no)
     warn "已跳过 TLS。请自行配置证书，并确认 public_base_url。"
     ;;
+  reuse)
+    apply_existing_cert || {
+      warn "复用失败，证书无效或不存在，转为重新申请 …"
+      issue_new_cert || true
+    }
+    ;;
   *)
-    info "探测本机 HTTP 健康检查 http://${DOMAIN}/healthz …"
-    reachable=0
-    for i in 1 2 3 4 5 6 7 8; do
-      if curl -fsS -m 5 "http://${DOMAIN}/healthz" >/dev/null 2>&1; then
-        ok "HTTP 可达（第 ${i} 次探测）"
-        reachable=1
-        break
-      fi
-      info "等待服务就绪… (${i}/8)"
-      sleep 2
-    done
-    if [[ "$reachable" -ne 1 ]]; then
-      warn "暂时无法通过域名访问 /healthz（DNS 或防火墙可能未就绪）"
-      warn "仍将尝试申请证书；失败时可稍后手动执行 certbot"
-    fi
-
-    if command -v certbot >/dev/null 2>&1; then
-      info "运行 certbot --nginx …"
-      if certbot --nginx -d "$DOMAIN" --non-interactive --agree-tos \
-          --register-unsafely-without-email --redirect; then
-        ok "Let's Encrypt 证书已安装"
-        sed -i "s|public_base_url:.*|public_base_url: \"https://${DOMAIN}\"|" \
-          "${INSTALL_DIR}/configs/config.yaml" 2>/dev/null \
-          || sed -i '' "s|public_base_url:.*|public_base_url: \"https://${DOMAIN}\"|" \
-          "${INSTALL_DIR}/configs/config.yaml" 2>/dev/null || true
-        systemctl restart "$SERVICE_NAME" || true
+    # Default Y: prefer reuse when cert already valid (avoids rate limits / duplicate issue)
+    if [[ "$FORCE_RENEW" -eq 1 ]]; then
+      info "用户要求强制重签，忽略已有证书 …"
+      # certbot will renew/reinstall for this domain
+      if command -v certbot >/dev/null 2>&1; then
+        info "运行 certbot --nginx --force-renewal -d ${DOMAIN} …"
+        if certbot --nginx -d "$DOMAIN" --non-interactive --agree-tos \
+            --register-unsafely-without-email --redirect --force-renewal; then
+          ok "证书已强制重新申请"
+          write_nginx_site "$DOMAIN" 1 "$NGINX_SITE" 2>/dev/null || true
+          nginx -t && systemctl reload nginx || true
+          sed -i "s|public_base_url:.*|public_base_url: \"https://${DOMAIN}\"|" \
+            "${INSTALL_DIR}/configs/config.yaml" 2>/dev/null || true
+          systemctl restart "$SERVICE_NAME" || true
+        else
+          warn "强制重签失败；若证书仍有效可继续使用旧证书"
+          apply_existing_cert || true
+        fi
       else
-        warn "certbot 失败。请确认 DNS A 记录指向本机，且 80/443 开放，然后执行:"
-        warn "  certbot --nginx -d ${DOMAIN} --redirect"
+        issue_new_cert || true
       fi
+    elif has_valid_cert "$DOMAIN"; then
+      ok "申请前检测: 域名证书已存在且有效，不再重复申请"
+      apply_existing_cert || true
     else
-      warn "未安装 certbot；请手动配置 SSL"
+      issue_new_cert || true
     fi
     ;;
 esac
@@ -597,19 +886,30 @@ echo "  Release:  ${RELEASE_TAG}  (${PLATFORM_OS}/${PLATFORM_ARCH})"
 echo "  Binary:   ${INSTALL_DIR}/${BIN_NAME}"
 echo "  Shop:     https://${DOMAIN}/shop/"
 echo "  Admin:    https://${DOMAIN}/admin/"
-echo "  User:     ${ADMIN_USER} / ${ADMIN_PASS}"
+if [[ "$REUSE_CFG" -eq 1 ]]; then
+  echo "  Admin:    沿用原配置中的账号（见历史 README-DEPLOY 或自行登录）"
+else
+  echo "  User:     ${ADMIN_USER} / ${ADMIN_PASS}"
+fi
 echo "  Secrets:  ${INSTALL_DIR}/README-DEPLOY.txt"
 echo "  Notify:   https://${DOMAIN}/alipay/notify"
 echo "  Config:   ${INSTALL_DIR}/configs/config.yaml"
+echo "  DB:       ${INSTALL_DIR}/data/giftcard.db$([[ $REUSE_DB -eq 1 ]] && echo ' (preserved)')"
+echo "  Cert:     $(has_valid_cert "$DOMAIN" && echo "reused/valid $(cert_expiry_info "$DOMAIN")" || echo "see certbot / skip")"
 echo "  Logs:     journalctl -u ${SERVICE_NAME} -f"
 echo "  =============================================="
 echo ""
 echo -e "  ${BOLD}接下来请完成:${NC}"
-echo "    1) 登录后台并修改密码"
+if [[ "$REUSE_CFG" -eq 0 ]]; then
+  echo "    1) 登录后台并修改密码"
+else
+  echo "    1) 使用原管理员账号登录后台"
+fi
 echo "    2) Admin → Payment: 填写支付宝密钥，生产环境关闭 mock_pay"
 echo "    3) 在 /shop/ 试下一单"
 echo "    4) K2 giftcard 的 base_url 设为 https://${DOMAIN}"
 echo ""
-echo -e "  ${DIM}重新安装/升级同一版本: 再次运行本脚本即可覆盖二进制${NC}"
+echo -e "  ${DIM}卸载仅停服务，保留数据库与 /etc/letsencrypt 证书${NC}"
+echo -e "  ${DIM}重装会复用 DB/配置/有效证书，避免重复申请域名证书${NC}"
 echo -e "  ${DIM}指定版本: VERSION=v1.0.0 sudo -E bash deploy/install.sh ${DOMAIN}${NC}"
 echo ""
