@@ -80,7 +80,7 @@ async function app() {
   try {
     const r = await api('/auth/me');
     me = r.user || me;
-    window.__site = r.site_name || 'NexusCard';
+    window.__site = r.site_name || '卡卡基地';
   } catch {
     setToken('');
     location.hash = '#/login';
@@ -92,7 +92,7 @@ async function app() {
         <div class="brand">
           <div class="brand-mark">N</div>
           <div>
-            <h1>${esc(window.__site || 'NexusCard')}</h1>
+            <h1>${esc(window.__site || '卡卡基地')}</h1>
             <p>管理后台</p>
           </div>
         </div>
@@ -129,7 +129,7 @@ async function renderLogin() {
       <div class="card login-card">
         <div class="brand" style="margin-bottom:18px">
           <div class="brand-mark">N</div>
-          <div><h1>NexusCard 控制台</h1><p>管理员登录</p></div>
+          <div><h1>卡卡基地控制台</h1><p>管理员登录</p></div>
         </div>
         <h2>欢迎回来</h2>
         <p class="muted" style="margin:0 0 16px;font-size:13px;line-height:1.5">

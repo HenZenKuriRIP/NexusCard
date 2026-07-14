@@ -686,6 +686,13 @@ if [[ "$REUSE_CFG" -eq 1 && -f "$CFG" ]]; then
     sed -i "s|listen:.*|listen: \"127.0.0.1:${LISTEN_PORT}\"|" "$CFG" 2>/dev/null \
       || sed -i '' "s|listen:.*|listen: \"127.0.0.1:${LISTEN_PORT}\"|" "$CFG" 2>/dev/null || true
   fi
+  # 站点品牌：旧默认 NexusCard / NexusCard Store → 卡卡基地
+  sed -i 's|site_name:[[:space:]]*"NexusCard"|site_name: "卡卡基地"|g' "$CFG" 2>/dev/null \
+    || sed -i '' 's|site_name:[[:space:]]*"NexusCard"|site_name: "卡卡基地"|g' "$CFG" 2>/dev/null || true
+  sed -i 's|title:[[:space:]]*"NexusCard Store"|title: "卡卡基地"|g' "$CFG" 2>/dev/null \
+    || sed -i '' 's|title:[[:space:]]*"NexusCard Store"|title: "卡卡基地"|g' "$CFG" 2>/dev/null || true
+  sed -i 's|title:[[:space:]]*"NexusCard"|title: "卡卡基地"|g' "$CFG" 2>/dev/null \
+    || sed -i '' 's|title:[[:space:]]*"NexusCard"|title: "卡卡基地"|g' "$CFG" 2>/dev/null || true
   ok "已保留: ${CFG}"
   [[ "$REUSE_DB" -eq 1 ]] && ok "已保留数据库: ${INSTALL_DIR}/data/giftcard.db"
 
@@ -764,10 +771,10 @@ else
     echo "  username: $(yaml_quote "${ADMIN_USER}")"
     echo "  password: $(yaml_quote "${ADMIN_PASS}")"
     echo "  jwt_secret: $(yaml_quote "${JWT_SECRET}")"
-    echo "  site_name: $(yaml_quote "NexusCard")"
+    echo "  site_name: $(yaml_quote "卡卡基地")"
     echo ""
     echo "shop:"
-    echo "  title: $(yaml_quote "NexusCard Store")"
+    echo "  title: $(yaml_quote "卡卡基地")"
     echo "  subtitle: $(yaml_quote "美区 Apple ID · 礼品卡 · Netflix / Google · 软件账号 · 自动发货")"
     echo "  order_ttl_min: 30"
   } > "$CFG"

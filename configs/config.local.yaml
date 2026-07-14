@@ -38,9 +38,9 @@ admin:
   username: "admin"
   password: "admin123"
   jwt_secret: "dev-jwt-secret-change-me"
-  site_name: "NexusCard"
+  site_name: "卡卡基地"
 
 shop:
-  title: "NexusCard Store"
-  subtitle: "US Apple ID · App Store cards · Google / Netflix · Data plans · Instant delivery"
+  title: "卡卡基地"
+  subtitle: "美区 Apple ID · 礼品卡 · Netflix / Google · 软件账号 · 自动发货"
   order_ttl_min: 30

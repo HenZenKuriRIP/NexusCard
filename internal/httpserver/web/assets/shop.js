@@ -43,9 +43,9 @@ async function boot() {
     const cr = await api('/categories');
     __cats = cr.categories || [];
   } catch (e) {
-    __cfg = { title: 'NexusCard', subtitle: '' };
+    __cfg = { title: '卡卡基地', subtitle: '' };
   }
-  document.title = (__cfg.title || 'NexusCard') + ' · 数字商品商城';
+  document.title = (__cfg.title || '卡卡基地') + ' · 数字商品商城';
   await render();
 }
 
@@ -59,7 +59,7 @@ function shell(inner, activeCat) {
  <a class="nx-logo" href="#/">
  <span class="nx-mark">N</span>
  <span>
- <b>${esc(__cfg.title || 'NexusCard')}</b>
+ <b>${esc(__cfg.title || '卡卡基地')}</b>
  <small>数字商品商城</small>
  </span>
  </a>
@@ -73,7 +73,7 @@ function shell(inner, activeCat) {
  <footer class="nx-foot">
  <div class="nx-foot-inner">
  <div>
- <b>${esc(__cfg.site_name || __cfg.title || 'NexusCard')}</b>
+ <b>${esc(__cfg.site_name || __cfg.title || '卡卡基地')}</b>
  <p>支付成功后自动发货</p>
  </div>
  <div class="nx-foot-meta">

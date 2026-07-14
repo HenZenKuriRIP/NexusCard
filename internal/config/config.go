@@ -219,10 +219,10 @@ func (c *Config) applyDefaults() {
 		}
 	}
 	if c.Admin.SiteName == "" {
-		c.Admin.SiteName = "NexusCard"
+		c.Admin.SiteName = "卡卡基地"
 	}
 	if c.Shop.Title == "" {
-		c.Shop.Title = c.Admin.SiteName + " Store"
+		c.Shop.Title = c.Admin.SiteName
 	}
 	if c.Shop.Subtitle == "" {
 		c.Shop.Subtitle = "美区 Apple ID · 礼品卡 · Netflix / Google · 软件账号 · 自动发货"
