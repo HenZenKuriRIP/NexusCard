@@ -225,7 +225,7 @@ func (c *Config) applyDefaults() {
 		c.Shop.Title = c.Admin.SiteName + " Store"
 	}
 	if c.Shop.Subtitle == "" {
-		c.Shop.Subtitle = "美区 Apple ID · 礼品卡 · Netflix / Google · 流量套餐 · 自动发货"
+		c.Shop.Subtitle = "美区 Apple ID · 礼品卡 · Netflix / Google · 软件账号 · 自动发货"
 	}
 	if c.Shop.OrderTTLMin <= 0 {
 		c.Shop.OrderTTLMin = 30

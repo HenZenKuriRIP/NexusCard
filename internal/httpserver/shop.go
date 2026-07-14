@@ -35,7 +35,7 @@ func (s *Server) shopConfig(c *gin.Context) {
 		"epay_configured":   ev["effective_enabled"],
 		"site_name":         s.Cfg.Admin.SiteName,
 		"features": []string{
-			"支付后自动发货", "美区 ID / 礼品卡", "Netflix 与流媒体", "流量套餐", "订单可查询",
+			"支付后自动发货", "美区 ID / 礼品卡", "Netflix 与流媒体", "软件下载账号", "订单可查询",
 		},
 	})
 }

@@ -9,7 +9,7 @@ function esc(s) {
     ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
 }
 function catIcon(code) {
-  const e = { apple_id: '🍎', apple_gc: '🎁', google: '🔵', netflix: '🎬', streaming: '🎧', data: '📡', other: '📦' };
+  const e = { apple_id: '🍎', apple_gc: '🎁', google: '🔵', netflix: '🎬', streaming: '🎧', other: '🚀' };
   return e[code] || '📦';
 }
 function statusLabel(status) {
@@ -123,7 +123,7 @@ async function homePage(cat) {
  <div class="float-card c1"><span>🍎</span><div><b>美区 Apple ID</b><small>即开即用</small></div></div>
  <div class="float-card c2"><span>🎁</span><div><b>App Store 卡</b><small>$10 / $50</small></div></div>
  <div class="float-card c3"><span>🎬</span><div><b>Netflix / Google</b><small>账号类</small></div></div>
- <div class="float-card c4"><span>📡</span><div><b>流量套餐</b><small>自动发货</small></div></div>
+ <div class="float-card c4"><span>🚀</span><div><b>Shadowrocket</b><small>下载账号 · ¥20</small></div></div>
  </div>
  </div>
  </section>
@@ -143,7 +143,7 @@ async function homePage(cat) {
  <div class="trust-grid">
  <div class="trust"><b>01</b><h3>即时支付</h3><p>支持支付宝 / 易支付，安全收银台。</p></div>
  <div class="trust"><b>02</b><h3>自动发货</h3><p>付款成功后立即展示卡密信息。</p></div>
- <div class="trust"><b>03</b><h3>丰富品类</h3><p>Apple、Google、Netflix、流媒体与流量。</p></div>
+ <div class="trust"><b>03</b><h3>丰富品类</h3><p>Apple、Google、Netflix、流媒体与软件账号。</p></div>
  <div class="trust"><b>04</b><h3>订单可查</h3><p>保留收银台链接，随时查看发货内容。</p></div>
  </div>
  </section>

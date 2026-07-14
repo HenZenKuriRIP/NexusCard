@@ -216,7 +216,7 @@ async function renderProducts() {
     </tr>`).join('') || `<tr><td colspan="5" class="muted">暂无商品</td></tr>`;
   $('#view').innerHTML = `
     <div class="toolbar">
-      <div class="muted">共 ${(r.products || []).length} 个商品 · 分类 apple_id / apple_gc / google / netflix / streaming / data</div>
+      <div class="muted">共 ${(r.products || []).length} 个商品 · 分类：美区 ID / 礼品卡 / Google / Netflix / 流媒体 / 软件</div>
       <a class="btn" href="#/product/new">添加商品</a>
     </div>
     <div class="card table-wrap"><table>
@@ -242,7 +242,7 @@ async function renderProductEdit(route) {
   }
   const catLabels = {
     apple_id: '美区 Apple ID', apple_gc: 'App Store 礼品卡', google: 'Google 账号',
-    netflix: 'Netflix', streaming: '流媒体', data: '流量/订阅', other: '其他',
+    netflix: 'Netflix', streaming: '流媒体', other: '软件 / 其他',
   };
   $('#view').innerHTML = `
     <div class="card">
@@ -251,7 +251,7 @@ async function renderProductEdit(route) {
         <div class="field"><label>Slug（URL 标识）</label><input id="slug" value="${esc(p.slug)}" placeholder="留空自动生成"/></div>
         <div class="field"><label>分类</label>
           <select id="category">
-            ${['apple_id','apple_gc','google','netflix','streaming','data','other'].map(c =>
+            ${['apple_id','apple_gc','google','netflix','streaming','other'].map(c =>
               `<option value="${c}" ${p.category===c?'selected':''}>${catLabels[c]||c}</option>`).join('')}
           </select>
         </div>
