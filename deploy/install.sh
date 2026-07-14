@@ -3,17 +3,22 @@
 # NexusCard one-click installer (Linux)
 #
 # Downloads a pre-built binary from GitHub Releases (no Go toolchain required).
+# Run as root (typical VPS login). Do NOT use sudo. Do NOT pipe curl|bash.
 #
-# Usage:
-#   curl -fsSL https://raw.githubusercontent.com/HenZenKuriRIP/NexusCard/main/deploy/install.sh \
-#     | sudo bash -s -- pay.example.com
+# Install (download then execute — no pipe):
+#   curl -fsSL -o /tmp/nexuscard-install.sh \
+#     https://raw.githubusercontent.com/HenZenKuriRIP/NexusCard/main/deploy/install.sh
+#   bash /tmp/nexuscard-install.sh pay.example.com
 #
 #   # Pin a release version
-#   curl -fsSL ... | sudo VERSION=v1.0.0 bash -s -- pay.example.com
+#   VERSION=v1.1.1 bash /tmp/nexuscard-install.sh pay.example.com
 #
-#   # From a local clone
-#   sudo bash deploy/install.sh pay.example.com
-#   sudo bash deploy/install.sh --uninstall
+# Uninstall (same script, service only; keeps DB/certs):
+#   bash /tmp/nexuscard-install.sh --uninstall
+#
+# From a local clone:
+#   bash deploy/install.sh pay.example.com
+#   bash deploy/install.sh --uninstall
 #
 # Environment:
 #   VERSION      Release tag (default: latest)
@@ -66,27 +71,49 @@ step() {
 }
 
 need_root() {
-  [[ "${EUID:-$(id -u)}" -eq 0 ]] || die "请使用 root 运行: sudo bash deploy/install.sh <domain>"
+  [[ "${EUID:-$(id -u)}" -eq 0 ]] || die "请使用 root 运行（不要加 sudo）: bash /tmp/nexuscard-install.sh <domain>"
+}
+
+# Refuse curl|bash / bash -s — script must be a real file so stdin stays free for prompts.
+refuse_pipe_install() {
+  local src="${BASH_SOURCE[0]:-}"
+  if [[ -z "$src" || "$src" == "bash" || "$src" == "-bash" || "$src" == "/dev/stdin" || ! -f "$src" ]]; then
+    cat <<'EOF' >&2
+
+  ✗ 请勿使用 curl|bash 管道安装（会污染配置且难以排错）。
+
+  正确方式（先下载再执行，root 直接 bash，不要 sudo）:
+
+    curl -fsSL -o /tmp/nexuscard-install.sh \
+      https://raw.githubusercontent.com/HenZenKuriRIP/NexusCard/main/deploy/install.sh
+    bash /tmp/nexuscard-install.sh your.domain.com
+
+  卸载:
+
+    bash /tmp/nexuscard-install.sh --uninstall
+
+EOF
+    exit 1
+  fi
 }
 
 rand_hex() { head -c "${1:-16}" /dev/urandom | od -A n -t x1 | tr -d ' \n'; }
 
-# curl|bash puts the script on stdin — never use bare `read` (it steals script lines).
-# Prefer /dev/tty; when unavailable (true non-interactive), use defaults.
-has_tty() { [[ -r /dev/tty && -w /dev/tty ]]; }
+# Interactive terminal for prompts (script file + TTY).
+has_tty() { [[ -t 0 ]] || [[ -r /dev/tty && -w /dev/tty ]]; }
 
 # prompt VAR "message" ["default"]
-# Sets VAR to user input, or default when empty / no TTY.
+# Sets VAR to user input, or default when empty / non-interactive.
 prompt() {
   local __var="$1" __msg="$2" __def="${3:-}" __ans=""
-  if has_tty; then
-    # Always read from the controlling terminal, not script stdin
+  if [[ -t 0 ]]; then
+    read -r -p "$__msg" __ans || __ans=""
+  elif [[ -r /dev/tty && -w /dev/tty ]]; then
     read -r -p "$__msg" __ans </dev/tty || __ans=""
   fi
   if [[ -z "$__ans" ]]; then
     __ans="$__def"
   fi
-  # Strip CR (Windows paste) and forbid newlines in config values
   __ans="${__ans//$'\r'/}"
   __ans="${__ans//$'\n'/}"
   printf -v "$__var" '%s' "$__ans"
@@ -110,7 +137,7 @@ config_is_valid() {
   grep -qE '^server:' "$f" || return 1
   grep -qE '^admin:' "$f" || return 1
   grep -qE '^db:' "$f" || return 1
-  # Odd number of " on a line usually means curl|bash polluted a value with a quote
+  # Odd number of " on a line usually means a broken / polluted value
   if awk 'BEGIN{bad=0} {
       n=gsub(/"/,"&");
       if (n%2!=0) { bad=1; exit }
@@ -426,6 +453,7 @@ do_uninstall() {
 }
 
 # ── entry ───────────────────────────────────────────────────────────────────
+refuse_pipe_install
 [[ "${1:-}" == "--uninstall" ]] && { need_root; do_uninstall; }
 
 need_root
@@ -452,7 +480,7 @@ fi
 DOMAIN="${DOMAIN#http://}"; DOMAIN="${DOMAIN#https://}"; DOMAIN="${DOMAIN%%/*}"
 
 if ! has_tty; then
-  info "非交互模式（无 TTY，如 curl|bash）→ 使用默认选项（HTTPS=是，随机管理员密码）"
+  info "非交互模式 → 使用默认选项（HTTPS=是，随机管理员密码）"
 fi
 
 # Detect reinstall / existing assets up front
@@ -461,7 +489,7 @@ REUSE_CFG=0
 REUSE_CERT=0
 [[ -f "${INSTALL_DIR}/data/giftcard.db" ]] && REUSE_DB=1
 [[ -f "${INSTALL_DIR}/configs/config.yaml" ]] && REUSE_CFG=1
-# Broken leftover config must not be reused (common after failed first install / curl|bash pollution)
+# Broken leftover config must not be reused (common after failed first install)
 if [[ "$REUSE_CFG" -eq 1 ]]; then
   CFG_BROKEN=0
   if ! config_is_valid "${INSTALL_DIR}/configs/config.yaml"; then
@@ -679,7 +707,7 @@ EOF
   ok "部署说明已更新（未重置密码）"
 else
   info "生成全新 config.yaml 与部署说明 …"
-  # Build YAML with properly quoted scalars (avoids breakages from special chars / curl|bash pollution)
+  # Build YAML with properly quoted scalars
   {
     echo "# NexusCard production config (minimal)."
     echo "# Configure Alipay / Epay keys in Admin UI -> Payment (hot reload)."
@@ -1032,5 +1060,6 @@ echo "    4) K2 giftcard 的 base_url 设为 https://${DOMAIN}"
 echo ""
 echo -e "  ${DIM}卸载仅停服务，保留数据库与 /etc/letsencrypt 证书${NC}"
 echo -e "  ${DIM}重装会复用 DB/配置/有效证书，避免重复申请域名证书${NC}"
-echo -e "  ${DIM}指定版本: VERSION=v1.0.0 sudo -E bash deploy/install.sh ${DOMAIN}${NC}"
+echo -e "  ${DIM}指定版本: VERSION=v1.1.1 bash /tmp/nexuscard-install.sh ${DOMAIN}${NC}"
+echo -e "  ${DIM}卸载:     bash /tmp/nexuscard-install.sh --uninstall${NC}"
 echo ""
