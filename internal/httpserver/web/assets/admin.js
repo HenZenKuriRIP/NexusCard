@@ -170,6 +170,7 @@ async function renderDashboard() {
       <p class="muted" style="margin:16px 0 0;font-size:13px;line-height:1.6">
         K2: payment method code=<code>giftcard</code>; base_url points here; app_id/api_secret match Merchants.
         Shop orders source=shop auto-deliver; K2 orders source=k2 notify panel.
+        Checkout supports Official Alipay and/or 彩虹易支付 — both work for K2 and shop.
       </p>
     </div>`;
 }
@@ -338,7 +339,7 @@ async function renderOrders() {
       <td class="muted">${o.notify_status || '-'}</td>
       <td class="row">
         ${o.status === 'pending' ? `<button class="btn sm ghost" data-close="${o.id}">Close</button>` : ''}
-        ${o.status === 'pending' || o.status === 'expired' ? `<button class="btn sm ghost" data-sync="${o.id}">Sync Alipay</button>` : ''}
+        ${o.status === 'pending' || o.status === 'expired' ? `<button class="btn sm ghost" data-sync="${o.id}">Sync Alipay</button> <button class="btn sm ghost" data-synce="${o.id}">Sync Epay</button>` : ''}
         ${o.source === 'k2' && (o.status === 'paid' || o.status === 'paid_orphan') ? `<button class="btn sm ghost" data-re="${o.id}">Retry K2 notify</button>` : ''}
         ${o.delivered ? `<button class="btn sm ghost" data-del="${esc(o.delivered)}">Secret</button>` : ''}
       </td>
@@ -368,6 +369,13 @@ async function renderOrders() {
     try {
       const o = await api('/orders/' + b.dataset.sync + '/sync-alipay', { method: 'POST' });
       alert('Sync result: ' + (o.status || JSON.stringify(o)));
+      renderOrders();
+    } catch (e) { alert(e.message); }
+  });
+  $$('[data-synce]').forEach(b => b.onclick = async () => {
+    try {
+      const o = await api('/orders/' + b.dataset.synce + '/sync-epay', { method: 'POST' });
+      alert('Epay sync: ' + (o.status || JSON.stringify(o)));
       renderOrders();
     } catch (e) { alert(e.message); }
   });
@@ -455,19 +463,20 @@ async function renderSettings() {
 }
 
 async function renderPayment() {
-  $('#page-title').textContent = 'Payment（Alipay）';
-  const p = await api('/settings/payment');
+  $('#page-title').textContent = 'Payment';
+  const [p, e] = await Promise.all([api('/settings/payment'), api('/settings/epay')]);
   $('#view').innerHTML = `
     <div class="card">
+      <h3 style="margin-top:0">Official Alipay</h3>
       <p class="muted" style="margin-top:0;font-size:13px;line-height:1.6">
-        Configure live payments here. Secrets stay on server; private keys are not re-displayed.
-        Notify URL (register on Alipay open platform)：<code>${esc(p.notify_url)}</code>
+        Secrets stay on server; private keys are not re-displayed.
+        Notify URL：<code>${esc(p.notify_url)}</code>
       </p>
       <div class="form-grid">
         <div class="field"><label>Enable Alipay</label>
           <select id="en"><option value="1" ${p.enabled!==false?'selected':''}>Yes</option><option value="0" ${p.enabled===false?'selected':''}>No</option></select>
         </div>
-        <div class="field"><label>Mock pay（for local testing without keys）</label>
+        <div class="field"><label>Mock pay（local testing）</label>
           <select id="mock"><option value="1" ${p.mock_pay?'selected':''}>On</option><option value="0" ${!p.mock_pay?'selected':''}>Off</option></select>
         </div>
         <div class="field"><label>App ID</label><input id="appid" value="${esc(p.app_id||'')}" placeholder="20xxxxxxxxxxxx"/></div>
@@ -491,11 +500,35 @@ async function renderPayment() {
         </div>
       </div>
       <div class="row">
-        <button class="btn" id="savePay">Save & apply</button>
-        <a class="btn ghost" href="/shop/" target="_blank">Open shop</a>
+        <button class="btn" id="savePay">Save Alipay</button>
       </div>
       <div id="payMsg" class="alert ok hidden" style="margin-top:12px"></div>
-      <p class="muted" style="font-size:12px;margin-top:16px">Public Base URL：${esc(p.public_base_url)}  (must be public)</p>
+    </div>
+    <div class="card" style="margin-top:16px">
+      <h3 style="margin-top:0">彩虹易支付（V1 易支付）</h3>
+      <p class="muted" style="margin-top:0;font-size:13px;line-height:1.6">
+        Works for K2 giftcard and shop checkout. After pay, platform notifies K2 as before.
+        Notify URL（填到易支付后台）：<code>${esc(e.notify_url)}</code><br/>
+        Return URL：<code>${esc(e.return_url)}</code>
+      </p>
+      <div class="form-grid">
+        <div class="field"><label>Enable Epay</label>
+          <select id="een"><option value="1" ${e.enabled?'selected':''}>Yes</option><option value="0" ${!e.enabled?'selected':''}>No</option></select>
+        </div>
+        <div class="field"><label>商户 ID (pid)</label><input id="epid" value="${esc(e.pid||'')}" placeholder="1000"/></div>
+        <div class="field full"><label>API 地址（不含 submit.php）</label><input id="eurl" value="${esc(e.api_url||'')}" placeholder="https://pay.example.com"/></div>
+        <div class="field full"><label>商户密钥 (key) ${e.has_key?'（已设置 — 留空保持不变）':''}</label>
+          <input id="ekey" type="password" autocomplete="new-password" placeholder="${e.has_key?'••••••••':''}"/>
+        </div>
+        <div class="field"><label>通道 types</label><input id="etypes" value="${esc(e.types||'alipay,wxpay')}" placeholder="alipay,wxpay"/></div>
+        <div class="field"><label>账单商品名</label><input id="ename" value="${esc(e.name||'Digital Goods')}"/></div>
+      </div>
+      <div class="row">
+        <button class="btn" id="saveEpay">Save Epay</button>
+        <a class="btn ghost" href="/shop/" target="_blank">Open shop</a>
+      </div>
+      <div id="epayMsg" class="alert ok hidden" style="margin-top:12px"></div>
+      <p class="muted" style="font-size:12px;margin-top:16px">Public Base URL：${esc(e.public_base_url || p.public_base_url)}（须公网可访问，供易支付异步回调）</p>
     </div>`;
   $('#savePay').onclick = async () => {
     try {
@@ -516,10 +549,31 @@ async function renderPayment() {
       $('#payMsg').classList.remove('hidden');
       $('#priv').value = '';
       $('#pub').value = '';
-    } catch (e) {
-      $('#payMsg').textContent = e.message;
+    } catch (err) {
+      $('#payMsg').textContent = err.message;
       $('#payMsg').className = 'alert err';
       $('#payMsg').classList.remove('hidden');
+    }
+  };
+  $('#saveEpay').onclick = async () => {
+    try {
+      const body = {
+        enabled: $('#een').value === '1',
+        api_url: $('#eurl').value.trim(),
+        pid: $('#epid').value.trim(),
+        key: $('#ekey').value.trim(),
+        types: $('#etypes').value.trim() || 'alipay',
+        name: $('#ename').value.trim() || 'Digital Goods',
+      };
+      const r = await api('/settings/epay', { method: 'PUT', body: JSON.stringify(body) });
+      $('#epayMsg').textContent = 'Saved. Epay active=' + !!(r.epay && r.epay.effective_enabled) + ' types=' + (r.epay && r.epay.types || '');
+      $('#epayMsg').className = 'alert ok';
+      $('#epayMsg').classList.remove('hidden');
+      $('#ekey').value = '';
+    } catch (err) {
+      $('#epayMsg').textContent = err.message;
+      $('#epayMsg').className = 'alert err';
+      $('#epayMsg').classList.remove('hidden');
     }
   };
 }

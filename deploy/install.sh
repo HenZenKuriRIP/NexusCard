@@ -647,6 +647,8 @@ Shop:       ${PUBLIC_URL}/shop/
 Admin:      ${PUBLIC_URL}/admin/
 Health:     ${PUBLIC_URL}/healthz
 Alipay notify: ${PUBLIC_URL}/alipay/notify
+Epay notify:   ${PUBLIC_URL}/epay/notify
+Epay return:   ${PUBLIC_URL}/epay/return
 
 Admin user: ${ADMIN_USER}
 Admin pass: ${ADMIN_PASS}
@@ -660,8 +662,8 @@ K2 giftcard:
 
 Next steps:
   1) Login admin, change password
-  2) Admin -> Payment: enter Alipay keys, disable mock_pay for production
-  3) Test shop purchase at /shop/
+  2) Admin -> Payment: Alipay and/or 彩虹易支付 (epay), disable mock_pay for production
+  3) Test shop purchase at /shop/ (cashier shows available pay methods)
   4) Point K2 payment method giftcard to base_url above
 
 Binary:  ${INSTALL_DIR}/${BIN_NAME}

@@ -32,8 +32,7 @@ const cashierHTML = `<!DOCTYPE html>
   <div class="amt"><small style="font-size:18px;font-weight:600">¥</small> {{.AmountYuan}}</div>
   <div class="meta">
     Time left：<b id="cd">--</b><br/>
-    {{if .AlipayReady}}Official Alipay checkout supported{{end}}
-    {{if .MockPay}} · Mock pay available{{end}}
+    {{if .AlipayReady}}Official Alipay{{end}}{{if and .AlipayReady .EpayReady}} · {{end}}{{if .EpayReady}}彩虹易支付{{end}}{{if .MockPay}} · Mock pay{{end}}
   </div>
   <div id="msg" class="status-msg" style="display:none;margin-top:14px;padding:10px 12px;border-radius:10px;font-size:13px"></div>
   <div id="deliver" style="display:none">
@@ -42,9 +41,15 @@ const cashierHTML = `<!DOCTYPE html>
   </div>
   {{if .CanPay}}
   {{if .AlipayReady}}
-  <button class="btn btn-ali" id="payBtn" type="button">Pay with Alipay</button>
-  {{else}}
-  <button class="btn btn-ali" id="payBtn" type="button" disabled title="configure Alipay keys">Alipay not configured</button>
+  <button class="btn btn-ali" id="payBtn" type="button">官方支付宝</button>
+  {{end}}
+  {{if .EpayReady}}
+  {{range .EpayTypes}}
+  <button class="btn btn-epay" type="button" data-epay-type="{{.}}">{{epayLabel .}}</button>
+  {{end}}
+  {{end}}
+  {{if and (not .AlipayReady) (not .EpayReady) (not .MockPay)}}
+  <button class="btn btn-ali" type="button" disabled title="configure payment">暂无可用支付方式</button>
   {{end}}
   {{if .MockPay}}
   <button class="btn btn-mock" id="mockBtn" type="button">Mock payment successful</button>
@@ -118,6 +123,25 @@ if(payBtn && !payBtn.disabled){
     }catch(e){ show(String(e)); payBtn.disabled=false; }
   };
 }
+document.querySelectorAll("[data-epay-type]").forEach(btn=>{
+  btn.onclick = async ()=>{
+    const type = btn.getAttribute("data-epay-type");
+    btn.disabled=true;
+    try{
+      const r = await fetch("/public/orders/epay-pay", {
+        method:"POST", headers:{"Content-Type":"application/json"},
+        body: JSON.stringify({token, type})
+      });
+      const j = await r.json();
+      if(j.code===0 && j.data && j.data.pay_url){
+        location.href = j.data.pay_url;
+        return;
+      }
+      show(j.message||"Failed to start Epay");
+      btn.disabled=false;
+    }catch(e){ show(String(e)); btn.disabled=false; }
+  };
+});
 const mockBtn=document.getElementById("mockBtn");
 if(mockBtn){
   mockBtn.onclick = async ()=>{
@@ -140,7 +164,24 @@ if(mockBtn){
 </body>
 </html>`
 
-var cashierTmpl = template.Must(template.New("cashier").Parse(cashierHTML))
+var cashierTmpl = template.Must(template.New("cashier").Funcs(template.FuncMap{
+	"epayLabel": epayTypeLabel,
+}).Parse(cashierHTML))
+
+func epayTypeLabel(t string) string {
+	switch t {
+	case "alipay":
+		return "支付宝（易支付）"
+	case "wxpay":
+		return "微信支付（易支付）"
+	case "qqpay":
+		return "QQ钱包（易支付）"
+	case "bank":
+		return "网银（易支付）"
+	default:
+		return t + "（易支付）"
+	}
+}
 
 func (s *Server) registerCashier(r *gin.Engine) {
 	// Static path before /c/:token
@@ -150,13 +191,20 @@ func (s *Server) registerCashier(r *gin.Engine) {
 	r.GET("/public/orders/status", rateLimitMiddleware(limPublicPay, "status"), s.publicStatus)
 	r.POST("/public/orders/mock-pay", rateLimitMiddleware(limPublicPay, "mock_pay"), s.publicMockPay)
 	r.POST("/public/orders/alipay-pay", rateLimitMiddleware(limPublicPay, "alipay_pay"), s.publicAlipayPay)
+	r.POST("/public/orders/epay-pay", rateLimitMiddleware(limPublicPay, "epay_pay"), s.publicEpayPay)
 	r.POST("/alipay/notify", rateLimitMiddleware(limNotify, "alipay_notify"), s.alipayNotify)
+	r.GET("/epay/notify", rateLimitMiddleware(limNotify, "epay_notify"), s.epayNotify)
+	r.POST("/epay/notify", rateLimitMiddleware(limNotify, "epay_notify"), s.epayNotify)
+	r.GET("/epay/return", rateLimitMiddleware(limPublicPay, "epay_return"), s.epayBrowserReturn)
+	r.POST("/epay/return", rateLimitMiddleware(limPublicPay, "epay_return"), s.epayBrowserReturn)
 	r.GET("/healthz", func(c *gin.Context) {
 		view := s.Settings.AlipayPublicView()
+		ev := s.Settings.EpayPublicView()
 		c.JSON(http.StatusOK, gin.H{
 			"ok":       true,
 			"service":  "giftcard-platform",
 			"alipay":   view["effective_enabled"],
+			"epay":     ev["effective_enabled"],
 			"mock_pay": view["mock_pay"],
 		})
 	})
@@ -176,6 +224,11 @@ func (s *Server) cashierPage(c *gin.Context) {
 	if ret == "" {
 		ret = "/shop/"
 	}
+	epayReady := s.Epay != nil && s.Epay.Configured() && canPay
+	var epayTypes []string
+	if epayReady {
+		epayTypes = s.Epay.Types()
+	}
 	data := map[string]any{
 		"Subject":       o.Subject,
 		"OutTradeNo":    o.OutTradeNo,
@@ -185,6 +238,8 @@ func (s *Server) cashierPage(c *gin.Context) {
 		"Paid":          paid,
 		"MockPay":       s.Settings.GetAlipay().MockPay && canPay,
 		"AlipayReady":   s.Alipay != nil && s.Alipay.Configured() && canPay,
+		"EpayReady":     epayReady,
+		"EpayTypes":     epayTypes,
 		"ExpireAt":      o.ExpireAt.Unix(),
 		"TokenJSON":     template.JS(mustJSON(token)),
 		"ReturnURLJSON": template.JS(mustJSON(ret)),

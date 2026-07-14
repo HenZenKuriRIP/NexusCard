@@ -386,6 +386,7 @@ body.cashier {
 .cashier-card .btn { width: 100%; margin-top: 12px; padding: 14px; border:0; border-radius: 12px; cursor:pointer; font-weight:700; }
 .cashier-card .btn-mock { background: linear-gradient(135deg, #10b981, #059669); color: white; }
 .cashier-card .btn-ali { background: linear-gradient(135deg, #1677ff, #0958d9); color: white; }
+.cashier-card .btn-epay { background: linear-gradient(135deg, #7c3aed, #5b21b6); color: white; }
 .cashier-card .btn:disabled { opacity: .5; cursor: not-allowed; }
 .cashier-card .badge { display:inline-flex; padding: 3px 8px; border-radius: 999px; font-size: 11px; font-weight: 700; }
 .cashier-card .badge.pending { background: #fef3c7; color: #b45309; }

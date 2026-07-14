@@ -13,6 +13,7 @@ type Config struct {
 	Server       ServerConfig       `yaml:"server"`
 	DB           DBConfig           `yaml:"db"`
 	Alipay       AlipayConfig       `yaml:"alipay"`
+	Epay         EpayConfig         `yaml:"epay"`
 	NotifyWorker NotifyWorkerConfig `yaml:"notify_worker"`
 	ExpireWorker ExpireWorkerConfig `yaml:"expire_worker"`
 	Security     SecurityConfig     `yaml:"security"`
@@ -43,6 +44,16 @@ type AlipayConfig struct {
 	// BillSubject is the Alipay payment title (subject/body). Empty → sanitize order subject or "Digital Goods".
 	// Recommended fixed neutral text, e.g. "Digital Goods" — never put plan/VPN names here.
 	BillSubject string `yaml:"bill_subject"`
+}
+
+// EpayConfig is 彩虹易支付 / V1 易支付 (optional; also editable in Admin).
+type EpayConfig struct {
+	APIURL  string `yaml:"api_url"`
+	PID     string `yaml:"pid"`
+	Key     string `yaml:"key"`
+	Types   string `yaml:"types"` // alipay,wxpay,qqpay
+	Name    string `yaml:"name"`
+	Enabled bool   `yaml:"enabled"`
 }
 
 type NotifyWorkerConfig struct {
@@ -125,6 +136,21 @@ func (c *Config) applyEnvOverrides() {
 	if v := os.Getenv("GC_ALIPAY_MOCK_PAY"); v != "" {
 		c.Alipay.MockPay = v == "1" || strings.EqualFold(v, "true")
 	}
+	if v := os.Getenv("GC_EPAY_API_URL"); v != "" {
+		c.Epay.APIURL = v
+	}
+	if v := os.Getenv("GC_EPAY_PID"); v != "" {
+		c.Epay.PID = v
+	}
+	if v := os.Getenv("GC_EPAY_KEY"); v != "" {
+		c.Epay.Key = v
+	}
+	if v := os.Getenv("GC_EPAY_TYPES"); v != "" {
+		c.Epay.Types = v
+	}
+	if v := os.Getenv("GC_EPAY_ENABLED"); v != "" {
+		c.Epay.Enabled = v == "1" || strings.EqualFold(v, "true")
+	}
 }
 
 func (c *Config) applyDefaults() {
@@ -206,6 +232,13 @@ func (c *Config) applyDefaults() {
 	}
 	if c.Alipay.IsProduction {
 		c.Alipay.MockPay = false
+	}
+	c.Epay.APIURL = strings.TrimRight(strings.TrimSpace(c.Epay.APIURL), "/")
+	if c.Epay.Types == "" {
+		c.Epay.Types = "alipay"
+	}
+	if strings.TrimSpace(c.Epay.Name) == "" {
+		c.Epay.Name = "Digital Goods"
 	}
 }
 

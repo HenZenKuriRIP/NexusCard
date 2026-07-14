@@ -10,6 +10,7 @@ import (
 
 	"github.com/HenZenKuriRIP/NexusCard/internal/alipay"
 	"github.com/HenZenKuriRIP/NexusCard/internal/config"
+	"github.com/HenZenKuriRIP/NexusCard/internal/epay"
 	"github.com/HenZenKuriRIP/NexusCard/internal/service"
 )
 
@@ -21,10 +22,12 @@ type Server struct {
 	Auth     *service.AuthService
 	Settings *service.SettingsService
 	Alipay   *service.AlipayService
+	Epay     *service.EpayService
 	Notify   *service.NotifyWorker
 	Expire   *service.ExpireWorker
 	engine   *gin.Engine
 	aliMu    sync.Mutex
+	epayMu   sync.Mutex
 }
 
 func New(cfg *config.Config, db *gorm.DB) *Server {
@@ -43,6 +46,7 @@ func New(cfg *config.Config, db *gorm.DB) *Server {
 		engine:   gin.New(),
 	}
 	s.reloadAlipayLocked()
+	s.reloadEpayLocked()
 
 	s.engine.Use(gin.Recovery(), gin.Logger())
 	s.registerCashier(s.engine)
@@ -101,6 +105,49 @@ func (s *Server) reloadAlipayLocked() {
 	)
 }
 
+// reloadEpay rebuilds epay client from DB+yaml settings.
+func (s *Server) reloadEpay() {
+	s.epayMu.Lock()
+	defer s.epayMu.Unlock()
+	s.reloadEpayLocked()
+}
+
+func (s *Server) reloadEpayLocked() {
+	ecfg := s.Settings.ToConfigEpay()
+	s.Cfg.Epay = ecfg
+
+	view := s.Settings.EpayPublicView()
+	if !view["effective_enabled"].(bool) {
+		s.Epay = nil
+		if ecfg.Enabled {
+			slog.Info("epay not ready — configure api_url / pid / key in Admin -> Payment")
+		} else {
+			slog.Info("epay disabled")
+		}
+		return
+	}
+	cli, err := epay.New(epay.Config{
+		APIURL:  ecfg.APIURL,
+		PID:     ecfg.PID,
+		Key:     ecfg.Key,
+		Types:   ecfg.Types,
+		Enabled: ecfg.Enabled,
+		Name:    ecfg.Name,
+	}, s.Cfg.Server.PublicBaseURL)
+	if err != nil {
+		slog.Error("epay client init failed", "err", err)
+		s.Epay = nil
+		return
+	}
+	s.Epay = &service.EpayService{Orders: s.Orders, Client: cli}
+	slog.Info("epay enabled",
+		"api_url", ecfg.APIURL,
+		"pid", maskAppID(ecfg.PID),
+		"types", ecfg.Types,
+		"notify", s.Cfg.Server.PublicBaseURL+"/epay/notify",
+	)
+}
+
 func (s *Server) StartWorkers() {
 	s.Notify.Start()
 	s.Expire.Start()
@@ -117,12 +164,14 @@ func (s *Server) Handler() http.Handler { return s.engine }
 func (s *Server) Run() error {
 	s.StartWorkers()
 	view := s.Settings.AlipayPublicView()
+	ev := s.Settings.EpayPublicView()
 	slog.Info("giftcard-platform listening",
 		"addr", s.Cfg.Server.Listen,
 		"public", s.Cfg.Server.PublicBaseURL,
 		"shop", s.Cfg.Server.PublicBaseURL+"/shop/",
 		"admin", s.Cfg.Server.PublicBaseURL+"/admin/",
 		"alipay", view["effective_enabled"],
+		"epay", ev["effective_enabled"],
 		"mock_pay", view["mock_pay"],
 	)
 	return s.engine.Run(s.Cfg.Server.Listen)

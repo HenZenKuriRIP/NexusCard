@@ -26,11 +26,13 @@ func (s *Server) registerShopAPI(r *gin.Engine) {
 
 func (s *Server) shopConfig(c *gin.Context) {
 	view := s.Settings.AlipayPublicView()
+	ev := s.Settings.EpayPublicView()
 	c.JSON(http.StatusOK, gin.H{
 		"title":             s.Cfg.Shop.Title,
 		"subtitle":          s.Cfg.Shop.Subtitle,
 		"mock_pay":          view["mock_pay"],
 		"alipay_configured": view["effective_enabled"],
+		"epay_configured":   ev["effective_enabled"],
 		"site_name":         s.Cfg.Admin.SiteName,
 		"features": []string{
 			"PaidAuto delivery", "US ID / gift cards", "Netflix & streaming", "DataData", "Orderslookup",

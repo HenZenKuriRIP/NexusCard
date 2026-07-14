@@ -13,6 +13,7 @@ import (
 )
 
 const settingKeyAlipay = "alipay"
+const settingKeyEpay = "epay"
 
 // AlipaySettings is admin-editable payment config (stored in DB, overrides yaml secrets).
 type AlipaySettings struct {
@@ -25,6 +26,16 @@ type AlipaySettings struct {
 	MockPay         bool   `json:"mock_pay"`
 	BillSubject     string `json:"bill_subject"`
 	Enabled         bool   `json:"enabled"` // master switch for showing real alipay button
+}
+
+// EpaySettings is 彩虹易支付 / V1 易支付 config (DB overrides yaml).
+type EpaySettings struct {
+	APIURL  string `json:"api_url"` // e.g. https://pay.example.com
+	PID     string `json:"pid"`
+	Key     string `json:"key"`
+	Types   string `json:"types"` // comma-separated: alipay,wxpay,qqpay
+	Name    string `json:"name"`  // bill product name
+	Enabled bool   `json:"enabled"`
 }
 
 type SettingsService struct {
@@ -151,4 +162,92 @@ func maskMid(id string) string {
 		return id
 	}
 	return id[:2] + "****" + id[len(id)-2:]
+}
+
+func (s *SettingsService) GetEpay() EpaySettings {
+	out := EpaySettings{
+		APIURL:  s.Cfg.Epay.APIURL,
+		PID:     s.Cfg.Epay.PID,
+		Key:     s.Cfg.Epay.Key,
+		Types:   s.Cfg.Epay.Types,
+		Name:    s.Cfg.Epay.Name,
+		Enabled: s.Cfg.Epay.Enabled,
+	}
+	if out.Types == "" {
+		out.Types = "alipay"
+	}
+	if out.Name == "" {
+		out.Name = "Digital Goods"
+	}
+	var row models.SiteSetting
+	if err := s.DB.Where("key = ?", settingKeyEpay).First(&row).Error; err != nil {
+		return out
+	}
+	var dbv EpaySettings
+	if json.Unmarshal([]byte(row.Value), &dbv) != nil {
+		return out
+	}
+	if strings.TrimSpace(dbv.APIURL) != "" {
+		out.APIURL = dbv.APIURL
+	}
+	if strings.TrimSpace(dbv.PID) != "" {
+		out.PID = dbv.PID
+	}
+	if strings.TrimSpace(dbv.Key) != "" {
+		out.Key = dbv.Key
+	}
+	if strings.TrimSpace(dbv.Types) != "" {
+		out.Types = dbv.Types
+	}
+	if strings.TrimSpace(dbv.Name) != "" {
+		out.Name = dbv.Name
+	}
+	// Enabled always from DB when row exists
+	out.Enabled = dbv.Enabled
+	return out
+}
+
+func (s *SettingsService) SaveEpay(in EpaySettings) error {
+	if strings.TrimSpace(in.Types) == "" {
+		in.Types = "alipay"
+	}
+	if strings.TrimSpace(in.Name) == "" {
+		in.Name = "Digital Goods"
+	}
+	cur := s.GetEpay()
+	if strings.TrimSpace(in.Key) == "" {
+		in.Key = cur.Key
+	}
+	b, _ := json.Marshal(in)
+	row := models.SiteSetting{Key: settingKeyEpay, Value: string(b), UpdatedAt: time.Now()}
+	return s.DB.Save(&row).Error
+}
+
+func (s *SettingsService) ToConfigEpay() config.EpayConfig {
+	e := s.GetEpay()
+	return config.EpayConfig{
+		APIURL:  e.APIURL,
+		PID:     e.PID,
+		Key:     e.Key,
+		Types:   e.Types,
+		Name:    e.Name,
+		Enabled: e.Enabled,
+	}
+}
+
+func (s *SettingsService) EpayPublicView() map[string]any {
+	e := s.GetEpay()
+	configured := strings.TrimSpace(e.APIURL) != "" &&
+		strings.TrimSpace(e.PID) != "" &&
+		strings.TrimSpace(e.Key) != ""
+	return map[string]any{
+		"api_url":           strings.TrimSpace(e.APIURL),
+		"pid_masked":        maskMid(e.PID),
+		"has_key":           strings.TrimSpace(e.Key) != "",
+		"types":             e.Types,
+		"name":              e.Name,
+		"enabled":           e.Enabled,
+		"configured":        configured,
+		"effective_enabled": e.Enabled && configured,
+	}
 }

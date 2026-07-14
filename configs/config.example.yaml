@@ -16,6 +16,15 @@ alipay:
   product: "page"
   timeout_express: "30m"
 
+# 彩虹易支付 / V1 易支付（也可在 Admin -> Payment 配置）
+epay:
+  enabled: false
+  api_url: "https://pay.example.com"
+  pid: ""
+  key: ""
+  types: "alipay,wxpay"
+  name: "Digital Goods"
+
 notify_worker:
   max_attempts: 12
   base_backoff_sec: 5

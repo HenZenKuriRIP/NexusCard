@@ -28,6 +28,7 @@ func (s *Server) registerAdmin(r *gin.Engine) {
 		ad.POST("/orders/:id/renotify", s.adminRenotify)
 		ad.POST("/orders/:id/close", s.adminClose)
 		ad.POST("/orders/:id/sync-alipay", s.adminSyncAlipay)
+		ad.POST("/orders/:id/sync-epay", s.adminSyncEpay)
 
 		ad.GET("/products", s.adminListProducts)
 		ad.POST("/products", s.adminCreateProduct)
@@ -44,6 +45,8 @@ func (s *Server) registerAdmin(r *gin.Engine) {
 		ad.GET("/settings", s.adminSettings)
 		ad.GET("/settings/payment", s.adminGetPayment)
 		ad.PUT("/settings/payment", s.adminSavePayment)
+		ad.GET("/settings/epay", s.adminGetEpay)
+		ad.PUT("/settings/epay", s.adminSaveEpay)
 	}
 }
 
@@ -363,8 +366,23 @@ func (s *Server) adminSyncAlipay(c *gin.Context) {
 	c.JSON(http.StatusOK, s.Orders.ToView(o))
 }
 
+func (s *Server) adminSyncEpay(c *gin.Context) {
+	id, _ := strconv.ParseUint(c.Param("id"), 10, 64)
+	if s.Epay == nil || !s.Epay.Configured() {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "epay not configured"})
+		return
+	}
+	o, err := s.Epay.SyncFromEpay(c.Request.Context(), uint(id))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, s.Orders.ToView(o))
+}
+
 func (s *Server) adminSettings(c *gin.Context) {
 	pay := s.Settings.AlipayPublicView()
+	ep := s.Settings.EpayPublicView()
 	c.JSON(http.StatusOK, gin.H{
 		"site_name":         s.Cfg.Admin.SiteName,
 		"public_base_url":   s.Cfg.Server.PublicBaseURL,
@@ -374,12 +392,15 @@ func (s *Server) adminSettings(c *gin.Context) {
 		"alipay_production": pay["is_production"],
 		"alipay_product":    pay["product"],
 		"alipay_notify_url": s.Cfg.Server.PublicBaseURL + "/alipay/notify",
+		"epay_configured":   ep["effective_enabled"],
+		"epay_notify_url":   s.Cfg.Server.PublicBaseURL + "/epay/notify",
 		"shop_title":        s.Cfg.Shop.Title,
 		"shop_subtitle":     s.Cfg.Shop.Subtitle,
 		"seed_merchant": gin.H{
 			"app_id": s.Cfg.SeedMerchant.AppID,
 		},
 		"payment": pay,
+		"epay":    ep,
 	})
 }
 
@@ -415,6 +436,36 @@ func (s *Server) adminSavePayment(c *gin.Context) {
 	}
 	s.reloadAlipay()
 	c.JSON(http.StatusOK, gin.H{"ok": true, "payment": s.Settings.AlipayPublicView()})
+}
+
+func (s *Server) adminGetEpay(c *gin.Context) {
+	e := s.Settings.GetEpay()
+	c.JSON(http.StatusOK, gin.H{
+		"api_url":         e.APIURL,
+		"pid":             e.PID,
+		"key":             "", // blank for edit; leave empty to keep
+		"has_key":         e.Key != "",
+		"types":           e.Types,
+		"name":            e.Name,
+		"enabled":         e.Enabled,
+		"notify_url":      s.Cfg.Server.PublicBaseURL + "/epay/notify",
+		"return_url":      s.Cfg.Server.PublicBaseURL + "/epay/return",
+		"public_base_url": s.Cfg.Server.PublicBaseURL,
+	})
+}
+
+func (s *Server) adminSaveEpay(c *gin.Context) {
+	var in service.EpaySettings
+	if err := c.ShouldBindJSON(&in); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if err := s.Settings.SaveEpay(in); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	s.reloadEpay()
+	c.JSON(http.StatusOK, gin.H{"ok": true, "epay": s.Settings.EpayPublicView()})
 }
 
 func maskAppID(id string) string {
