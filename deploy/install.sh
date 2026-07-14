@@ -3,18 +3,19 @@
 # NexusCard one-click installer (Linux)
 #
 # Downloads a pre-built binary from GitHub Releases (no Go toolchain required).
-# Run as root (typical VPS login). Do NOT use sudo. Do NOT pipe curl|bash.
+# Run as root (typical VPS login). Do NOT use sudo.
 #
-# Install (download then execute — no pipe):
-#   curl -fsSL -o /tmp/nexuscard-install.sh \
-#     https://raw.githubusercontent.com/HenZenKuriRIP/NexusCard/main/deploy/install.sh
-#   bash /tmp/nexuscard-install.sh pay.example.com
+# Install (process substitution — preferred; keeps stdin free for prompts):
+#   bash <(curl -fsSL https://raw.githubusercontent.com/HenZenKuriRIP/NexusCard/main/deploy/install.sh) \
+#     pay.example.com
 #
 #   # Pin a release version
-#   VERSION=v1.1.1 bash /tmp/nexuscard-install.sh pay.example.com
+#   VERSION=v1.1.1 bash <(curl -fsSL https://raw.githubusercontent.com/HenZenKuriRIP/NexusCard/main/deploy/install.sh) \
+#     pay.example.com
 #
 # Uninstall (same script, service only; keeps DB/certs):
-#   bash /tmp/nexuscard-install.sh --uninstall
+#   bash <(curl -fsSL https://raw.githubusercontent.com/HenZenKuriRIP/NexusCard/main/deploy/install.sh) \
+#     --uninstall
 #
 # From a local clone:
 #   bash deploy/install.sh pay.example.com
@@ -71,30 +72,34 @@ step() {
 }
 
 need_root() {
-  [[ "${EUID:-$(id -u)}" -eq 0 ]] || die "请使用 root 运行（不要加 sudo）: bash /tmp/nexuscard-install.sh <domain>"
+  [[ "${EUID:-$(id -u)}" -eq 0 ]] || die "请使用 root 运行（不要加 sudo）:
+  bash <(curl -fsSL https://raw.githubusercontent.com/HenZenKuriRIP/NexusCard/main/deploy/install.sh) <domain>"
 }
 
-# Refuse curl|bash / bash -s — script must be a real file so stdin stays free for prompts.
-refuse_pipe_install() {
+# Refuse curl|bash / bash -s (script on stdin steals interactive prompts).
+# Allow: regular file, or process substitution bash <(curl ...) → /dev/fd/N
+refuse_stdin_script() {
   local src="${BASH_SOURCE[0]:-}"
-  if [[ -z "$src" || "$src" == "bash" || "$src" == "-bash" || "$src" == "/dev/stdin" || ! -f "$src" ]]; then
-    cat <<'EOF' >&2
+  # bash -s / curl|bash: no script path; process sub has /dev/fd/* or /proc/self/fd/*
+  if [[ -n "$src" && ( -f "$src" || "$src" == /dev/fd/* || "$src" == /proc/self/fd/* ) ]]; then
+    return 0
+  fi
+  cat <<'EOF' >&2
 
-  ✗ 请勿使用 curl|bash 管道安装（会污染配置且难以排错）。
+  ✗ 请勿使用 curl | bash 管道安装（脚本占满 stdin，配置易损坏）。
 
-  正确方式（先下载再执行，root 直接 bash，不要 sudo）:
+  推荐方式（root，不要 sudo）:
 
-    curl -fsSL -o /tmp/nexuscard-install.sh \
-      https://raw.githubusercontent.com/HenZenKuriRIP/NexusCard/main/deploy/install.sh
-    bash /tmp/nexuscard-install.sh your.domain.com
+    bash <(curl -fsSL https://raw.githubusercontent.com/HenZenKuriRIP/NexusCard/main/deploy/install.sh) \
+      your.domain.com
 
   卸载:
 
-    bash /tmp/nexuscard-install.sh --uninstall
+    bash <(curl -fsSL https://raw.githubusercontent.com/HenZenKuriRIP/NexusCard/main/deploy/install.sh) \
+      --uninstall
 
 EOF
-    exit 1
-  fi
+  exit 1
 }
 
 rand_hex() { head -c "${1:-16}" /dev/urandom | od -A n -t x1 | tr -d ' \n'; }
@@ -453,7 +458,7 @@ do_uninstall() {
 }
 
 # ── entry ───────────────────────────────────────────────────────────────────
-refuse_pipe_install
+refuse_stdin_script
 [[ "${1:-}" == "--uninstall" ]] && { need_root; do_uninstall; }
 
 need_root
@@ -1060,6 +1065,6 @@ echo "    4) K2 giftcard 的 base_url 设为 https://${DOMAIN}"
 echo ""
 echo -e "  ${DIM}卸载仅停服务，保留数据库与 /etc/letsencrypt 证书${NC}"
 echo -e "  ${DIM}重装会复用 DB/配置/有效证书，避免重复申请域名证书${NC}"
-echo -e "  ${DIM}指定版本: VERSION=v1.1.1 bash /tmp/nexuscard-install.sh ${DOMAIN}${NC}"
-echo -e "  ${DIM}卸载:     bash /tmp/nexuscard-install.sh --uninstall${NC}"
+echo -e "  ${DIM}指定版本: VERSION=v1.1.1 bash <(curl -fsSL https://raw.githubusercontent.com/${REPO}/main/deploy/install.sh) ${DOMAIN}${NC}"
+echo -e "  ${DIM}卸载:     bash <(curl -fsSL https://raw.githubusercontent.com/${REPO}/main/deploy/install.sh) --uninstall${NC}"
 echo ""
