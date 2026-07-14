@@ -122,32 +122,51 @@ async function renderLogin() {
       <div class="card login-card">
         <div class="brand" style="margin-bottom:18px">
           <div class="brand-mark">G</div>
-          <div><h1>GiftCard Console</h1><p>Admin login</p></div>
+          <div><h1>NexusCard Console</h1><p>Admin login</p></div>
         </div>
         <h2>Welcome back</h2>
-        <p>Default credentials: admin.username / admin.password</p>
+        <p class="muted" style="margin:0 0 16px;font-size:13px;line-height:1.5">
+          用户名默认 <code>admin</code>；密码见服务器
+          <code>/opt/giftcard-platform/README-DEPLOY.txt</code>（安装时随机生成，非 admin123）
+        </p>
         <div id="err" class="alert err hidden"></div>
-        <div class="field"><label>Username</label><input id="u" value="admin" autocomplete="username"/></div>
-        <div class="field"><label>Password</label><input id="p" type="password" value="admin123" autocomplete="current-password"/></div>
-        <button class="btn" id="go" style="width:100%">Sign in</button>
+        <form id="loginForm" autocomplete="on">
+          <div class="field"><label>Username</label>
+            <input id="u" name="username" type="text" value="admin" autocomplete="username" autocapitalize="off" spellcheck="false"/>
+          </div>
+          <div class="field"><label>Password</label>
+            <input id="p" name="password" type="password" value="" placeholder="粘贴部署时生成的密码" autocomplete="current-password"/>
+          </div>
+          <button class="btn" id="go" type="submit" style="width:100%">Sign in</button>
+        </form>
       </div>
     </div>`;
-  const go = async () => {
+  const form = $('#loginForm');
+  const go = async (ev) => {
+    if (ev) ev.preventDefault();
     $('#err').classList.add('hidden');
+    const username = ($('#u').value || '').trim();
+    const password = $('#p').value || '';
+    if (!username || !password) {
+      $('#err').textContent = '请输入用户名和密码';
+      $('#err').classList.remove('hidden');
+      return;
+    }
     try {
       const r = await api('/auth/login', {
         method: 'POST',
-        body: JSON.stringify({ username: $('#u').value, password: $('#p').value }),
+        body: JSON.stringify({ username, password }),
       });
       setToken(r.token);
       location.hash = '#/dashboard';
     } catch (e) {
-      $('#err').textContent = e.message;
+      $('#err').textContent = e.message || '登录失败';
       $('#err').classList.remove('hidden');
+      $('#p').focus();
+      $('#p').select();
     }
   };
-  $('#go').onclick = go;
-  $('#p').onkeydown = (e) => e.key === 'Enter' && go();
+  form.onsubmit = go;
 }
 
 async function renderDashboard() {
@@ -464,8 +483,21 @@ async function renderSettings() {
 
 async function renderPayment() {
   $('#page-title').textContent = 'Payment';
-  const [p, e] = await Promise.all([api('/settings/payment'), api('/settings/epay')]);
+  let p = {};
+  let e = {};
+  try {
+    p = await api('/settings/payment') || {};
+  } catch (err) {
+    $('#view').innerHTML = `<div class="card"><div class="alert err">加载支付宝配置失败: ${esc(err.message)}</div></div>`;
+    return;
+  }
+  try {
+    e = await api('/settings/epay') || {};
+  } catch (err) {
+    e = { _error: err.message, enabled: false, types: 'alipay,wxpay', name: 'Digital Goods' };
+  }
   $('#view').innerHTML = `
+    ${e._error ? `<div class="alert err" style="margin-bottom:12px">易支付配置接口暂不可用: ${esc(e._error)}（请升级到含 epay 的版本）</div>` : ''}
     <div class="card">
       <h3 style="margin-top:0">Official Alipay</h3>
       <p class="muted" style="margin-top:0;font-size:13px;line-height:1.6">

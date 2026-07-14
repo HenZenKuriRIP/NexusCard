@@ -43,6 +43,12 @@ func (s *Server) registerWeb(r *gin.Engine) {
 			c.Status(http.StatusNotFound)
 			return
 		}
+		// JS/CSS are embedded in the binary; must not be cached across upgrades
+		if strings.HasSuffix(p, ".js") || strings.HasSuffix(p, ".css") {
+			c.Header("Cache-Control", "no-cache, must-revalidate")
+		} else {
+			c.Header("Cache-Control", "public, max-age=3600")
+		}
 		c.Data(http.StatusOK, contentType(p), data)
 	})
 }
@@ -53,6 +59,8 @@ func serveFile(c *gin.Context, sub fs.FS, name, ct string) {
 		c.String(http.StatusInternalServerError, "web assets missing: "+err.Error())
 		return
 	}
+	// Avoid stale admin.js after deploy (browsers otherwise keep old hardcoded login form)
+	c.Header("Cache-Control", "no-cache, must-revalidate")
 	c.Data(http.StatusOK, ct, data)
 }
 
