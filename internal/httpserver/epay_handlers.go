@@ -74,7 +74,7 @@ func (s *Server) epayBrowserReturn(c *gin.Context) {
 	}
 	o, err := s.Orders.FindByPlatformTradeNo(ptn)
 	if err != nil {
-		c.String(http.StatusOK, "Payment result is processing. Check the merchant order page.")
+		c.String(http.StatusOK, "支付结果处理中，请稍后在商户订单页查看。")
 		return
 	}
 	// Optional active query if still pending

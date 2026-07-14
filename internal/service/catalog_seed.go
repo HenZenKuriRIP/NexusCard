@@ -19,13 +19,13 @@ type CategoryMeta struct {
 
 func ShopCategories() []CategoryMeta {
 	return []CategoryMeta{
-		{Code: models.CatAppleID, Name: "US Apple ID", Icon: "", Hint: "Ready accounts", Color: "#111827"},
-		{Code: models.CatAppleGC, Name: "App Store Cards", Icon: "", Hint: "US gift codes", Color: "#0071e3"},
-		{Code: models.CatGoogle, Name: "Google Accounts", Icon: "", Hint: "Gmail / Play", Color: "#ea4335"},
-		{Code: models.CatNetflix, Name: "Netflix", Icon: "", Hint: "Streaming accounts", Color: "#e50914"},
-		{Code: models.CatStreaming, Name: "Streaming", Icon: "", Hint: "Disney+ / Spotify", Color: "#8b5cf6"},
-		{Code: models.CatData, Name: "Data plans", Icon: "", Hint: "Subscription tokens", Color: "#0ea5e9"},
-		{Code: models.CatOther, Name: "Other", Icon: "", Hint: "More digital goods", Color: "#64748b"},
+		{Code: models.CatAppleID, Name: "美区 Apple ID", Icon: "", Hint: "成品账号", Color: "#111827"},
+		{Code: models.CatAppleGC, Name: "App Store 礼品卡", Icon: "", Hint: "美区兑换码", Color: "#0071e3"},
+		{Code: models.CatGoogle, Name: "Google 账号", Icon: "", Hint: "Gmail / Play", Color: "#ea4335"},
+		{Code: models.CatNetflix, Name: "Netflix", Icon: "", Hint: "流媒体账号", Color: "#e50914"},
+		{Code: models.CatStreaming, Name: "流媒体", Icon: "", Hint: "Disney+ / Spotify", Color: "#8b5cf6"},
+		{Code: models.CatData, Name: "流量套餐", Icon: "", Hint: "订阅/凭证", Color: "#0ea5e9"},
+		{Code: models.CatOther, Name: "其他", Icon: "", Hint: "更多数字商品", Color: "#64748b"},
 	}
 }
 

@@ -171,7 +171,7 @@ banner() {
   cat <<'EOF'
   ======================================================
    NexusCard  ·  One-Click Setup
-   Digital goods · Alipay · K2 giftcard · Domain + TLS
+   数字商品 · 支付宝 · K2 礼品卡 · 域名 + TLS
   ======================================================
 EOF
   echo -e "${NC}"
@@ -768,7 +768,7 @@ else
     echo ""
     echo "shop:"
     echo "  title: $(yaml_quote "NexusCard Store")"
-    echo "  subtitle: $(yaml_quote "US Apple ID · App Store cards · Google / Netflix · Data plans · Instant delivery")"
+    echo "  subtitle: $(yaml_quote "美区 Apple ID · 礼品卡 · Netflix / Google · 流量套餐 · 自动发货")"
     echo "  order_ttl_min: 30"
   } > "$CFG"
 

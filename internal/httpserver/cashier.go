@@ -18,25 +18,25 @@ const cashierHTML = `<!DOCTYPE html>
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
-<title>Checkout · {{.Subject}}</title>
+<title>收银台 · {{.Subject}}</title>
 <link rel="stylesheet" href="/assets/app.css"/>
 </head>
 <body class="cashier">
 <div class="cashier-card">
   <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
-    <span class="muted" style="font-size:12px;letter-spacing:.08em;text-transform:uppercase">Checkout</span>
-    <span class="badge {{.Status}}">{{.Status}}</span>
+    <span class="muted" style="font-size:12px;letter-spacing:.08em">收银台</span>
+    <span class="badge {{.Status}}">{{statusCN .Status}}</span>
   </div>
   <h1>{{.Subject}}</h1>
-  <div class="meta">Order {{.OutTradeNo}}</div>
+  <div class="meta">订单号 {{.OutTradeNo}}</div>
   <div class="amt"><small style="font-size:18px;font-weight:600">¥</small> {{.AmountYuan}}</div>
   <div class="meta">
-    Time left：<b id="cd">--</b><br/>
-    {{if .AlipayReady}}Official Alipay{{end}}{{if and .AlipayReady .EpayReady}} · {{end}}{{if .EpayReady}}彩虹易支付{{end}}{{if .MockPay}} · Mock pay{{end}}
+    剩余时间：<b id="cd">--</b><br/>
+    {{if .AlipayReady}}官方支付宝{{end}}{{if and .AlipayReady .EpayReady}} · {{end}}{{if .EpayReady}}彩虹易支付{{end}}{{if .MockPay}} · 模拟支付{{end}}
   </div>
   <div id="msg" class="status-msg" style="display:none;margin-top:14px;padding:10px 12px;border-radius:10px;font-size:13px"></div>
   <div id="deliver" style="display:none">
-    <div class="meta" style="margin-top:14px">Delivery</div>
+    <div class="meta" style="margin-top:14px">发货内容</div>
     <div class="deliver-box" id="deliverBody"></div>
   </div>
   {{if .CanPay}}
@@ -49,17 +49,17 @@ const cashierHTML = `<!DOCTYPE html>
   {{end}}
   {{end}}
   {{if and (not .AlipayReady) (not .EpayReady) (not .MockPay)}}
-  <button class="btn btn-ali" type="button" disabled title="configure payment">暂无可用支付方式</button>
+  <button class="btn btn-ali" type="button" disabled title="请先配置支付">暂无可用支付方式</button>
   {{end}}
   {{if .MockPay}}
-  <button class="btn btn-mock" id="mockBtn" type="button">Mock payment successful</button>
+  <button class="btn btn-mock" id="mockBtn" type="button">模拟支付成功</button>
   {{end}}
   {{else if .Paid}}
-  <a class="btn btn-ali" id="retBtn" href="{{.ReturnURL}}">Done — return</a>
+  <a class="btn btn-ali" id="retBtn" href="{{.ReturnURL}}">完成 — 返回</a>
   {{else}}
-  <div class="meta" style="margin-top:16px">Order not payable（{{.Status}}）</div>
+  <div class="meta" style="margin-top:16px">订单不可支付（{{statusCN .Status}}）</div>
   {{end}}
-  <p class="meta" style="margin-top:18px;margin-bottom:0"><a href="/shop/">← Back to store</a></p>
+  <p class="meta" style="margin-top:18px;margin-bottom:0"><a href="/shop/">← 返回商城</a></p>
 </div>
 <script>
 const token = {{.TokenJSON}};
@@ -67,9 +67,9 @@ const expireAt = {{.ExpireAt}};
 const returnURL = {{.ReturnURLJSON}};
 const initialDelivered = {{.DeliveredJSON}};
 function fmt(sec){
-  if(sec<=0) return "expired";
+  if(sec<=0) return "已过期";
   const m=Math.floor(sec/60), s=sec%60;
-  return m+"m "+String(s).padStart(2,"0")+"s";
+  return m+"分 "+String(s).padStart(2,"0")+"秒";
 }
 function tick(){
   const left = expireAt - Math.floor(Date.now()/1000);
@@ -96,7 +96,7 @@ async function poll(){
     const j = await r.json();
     if(j.code===0 && j.data){
       if(j.data.status==="paid" || j.data.status==="paid_orphan"){
-        show("Payment successful","ok");
+        show("支付成功","ok");
         if(j.data.delivered) showDeliver(j.data.delivered);
         setTimeout(()=>{ if(returnURL) location.href=returnURL; }, 1600);
       }
@@ -118,7 +118,7 @@ if(payBtn && !payBtn.disabled){
         location.href = j.data.pay_url;
         return;
       }
-      show(j.message||"Failed to start Alipay");
+      show(j.message||"发起支付宝失败");
       payBtn.disabled=false;
     }catch(e){ show(String(e)); payBtn.disabled=false; }
   };
@@ -137,7 +137,7 @@ document.querySelectorAll("[data-epay-type]").forEach(btn=>{
         location.href = j.data.pay_url;
         return;
       }
-      show(j.message||"Failed to start Epay");
+      show(j.message||"发起易支付失败");
       btn.disabled=false;
     }catch(e){ show(String(e)); btn.disabled=false; }
   };
@@ -153,10 +153,10 @@ if(mockBtn){
       });
       const j = await r.json();
       if(j.code===0){
-        show("Mock payment successful","ok");
+        show("模拟支付成功","ok");
         if(j.data && j.data.delivered) showDeliver(j.data.delivered);
         poll();
-      } else { show(j.message||"failed"); mockBtn.disabled=false; }
+      } else { show(j.message||"失败"); mockBtn.disabled=false; }
     }catch(e){ show(String(e)); mockBtn.disabled=false; }
   };
 }
@@ -166,6 +166,7 @@ if(mockBtn){
 
 var cashierTmpl = template.Must(template.New("cashier").Funcs(template.FuncMap{
 	"epayLabel": epayTypeLabel,
+	"statusCN":  orderStatusCN,
 }).Parse(cashierHTML))
 
 func epayTypeLabel(t string) string {
@@ -180,6 +181,23 @@ func epayTypeLabel(t string) string {
 		return "网银（易支付）"
 	default:
 		return t + "（易支付）"
+	}
+}
+
+func orderStatusCN(s string) string {
+	switch s {
+	case "pending":
+		return "待支付"
+	case "paid":
+		return "已支付"
+	case "closed":
+		return "已关闭"
+	case "expired":
+		return "已过期"
+	case "paid_orphan":
+		return "异常已付"
+	default:
+		return s
 	}
 }
 
@@ -214,7 +232,7 @@ func (s *Server) cashierPage(c *gin.Context) {
 	token := c.Param("token")
 	o, err := s.Orders.GetByCashierToken(token)
 	if err != nil {
-		c.String(http.StatusNotFound, "Order not found or link invalid")
+		c.String(http.StatusNotFound, "订单不存在或链接无效")
 		return
 	}
 	canPay := o.Status == "pending" && time.Now().Before(o.ExpireAt)
@@ -255,7 +273,7 @@ func (s *Server) cashierPage(c *gin.Context) {
 func (s *Server) cashierReturn(c *gin.Context) {
 	o, err := s.Orders.GetByCashierToken(c.Param("token"))
 	if err != nil {
-		c.String(http.StatusNotFound, "not found")
+		c.String(http.StatusNotFound, "未找到订单")
 		return
 	}
 	if o.ReturnURL == "" {
@@ -269,7 +287,7 @@ func (s *Server) publicStatus(c *gin.Context) {
 	token := c.Query("token")
 	o, err := s.Orders.GetByCashierToken(token)
 	if err != nil {
-		JSONErr(c, http.StatusNotFound, 40401, "not found")
+		JSONErr(c, http.StatusNotFound, 40401, "订单不存在")
 		return
 	}
 	JSONOK(c, gin.H{
@@ -293,7 +311,7 @@ func (s *Server) publicMockPay(c *gin.Context) {
 	if err != nil {
 		switch {
 		case errors.Is(err, service.ErrNotFound):
-			JSONErr(c, http.StatusNotFound, 40401, "not found")
+			JSONErr(c, http.StatusNotFound, 40401, "订单不存在")
 		case errors.Is(err, service.ErrConflictClosed):
 			JSONErr(c, http.StatusConflict, 40902, err.Error())
 		case errors.Is(err, service.ErrBadParam):
