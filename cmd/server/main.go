@@ -18,6 +18,7 @@ var version = "dev"
 func main() {
 	cfgPath := flag.String("config", "configs/config.example.yaml", "path to config yaml")
 	showVersion := flag.Bool("version", false, "print version and exit")
+	checkConfig := flag.Bool("check-config", false, "load config and exit 0 if valid")
 	flag.Parse()
 	if *showVersion {
 		fmt.Println(version)
@@ -28,6 +29,10 @@ func main() {
 	if err != nil {
 		slog.Error("load config", "err", err)
 		os.Exit(1)
+	}
+	if *checkConfig {
+		fmt.Println("ok")
+		os.Exit(0)
 	}
 
 	db, err := database.Open(cfg)

@@ -71,6 +71,68 @@ need_root() {
 
 rand_hex() { head -c "${1:-16}" /dev/urandom | od -A n -t x1 | tr -d ' \n'; }
 
+# curl|bash puts the script on stdin — never use bare `read` (it steals script lines).
+# Prefer /dev/tty; when unavailable (true non-interactive), use defaults.
+has_tty() { [[ -r /dev/tty && -w /dev/tty ]]; }
+
+# prompt VAR "message" ["default"]
+# Sets VAR to user input, or default when empty / no TTY.
+prompt() {
+  local __var="$1" __msg="$2" __def="${3:-}" __ans=""
+  if has_tty; then
+    # Always read from the controlling terminal, not script stdin
+    read -r -p "$__msg" __ans </dev/tty || __ans=""
+  fi
+  if [[ -z "$__ans" ]]; then
+    __ans="$__def"
+  fi
+  # Strip CR (Windows paste) and forbid newlines in config values
+  __ans="${__ans//$'\r'/}"
+  __ans="${__ans//$'\n'/}"
+  printf -v "$__var" '%s' "$__ans"
+}
+
+# YAML double-quoted scalar escaping
+yaml_quote() {
+  local s="$1"
+  s="${s//\\/\\\\}"
+  s="${s//\"/\\\"}"
+  s="${s//$'\n'/\\n}"
+  s="${s//$'\r'/}"
+  printf '"%s"' "$s"
+}
+
+# Return 0 if config.yaml is parseable enough to start the service.
+# Prefer the installed binary (-check-config); fall back to structural checks.
+config_is_valid() {
+  local f="$1"
+  [[ -f "$f" && -s "$f" ]] || return 1
+  grep -qE '^server:' "$f" || return 1
+  grep -qE '^admin:' "$f" || return 1
+  grep -qE '^db:' "$f" || return 1
+  # Odd number of " on a line usually means curl|bash polluted a value with a quote
+  if awk 'BEGIN{bad=0} {
+      n=gsub(/"/,"&");
+      if (n%2!=0) { bad=1; exit }
+    } END{ exit bad }' "$f" 2>/dev/null; then
+    :
+  else
+    return 1
+  fi
+  local bin="${INSTALL_DIR}/${BIN_NAME}"
+  if [[ -x "$bin" ]]; then
+    if "$bin" -check-config -config "$f" >/dev/null 2>&1; then
+      return 0
+    fi
+    # Older binaries without -check-config: try load via short timeout run is too heavy
+    # If binary supports the flag, failure means invalid YAML
+    if "$bin" -h 2>&1 | grep -q 'check-config'; then
+      return 1
+    fi
+  fi
+  return 0
+}
+
 banner() {
   echo ""
   echo -e "${CYAN}${BOLD}"
@@ -377,14 +439,21 @@ if [[ -z "$DOMAIN" ]]; then
       "${INSTALL_DIR}/configs/config.yaml" 2>/dev/null | head -1 || true)"
   fi
   if [[ -n "${PREV_DOMAIN:-}" ]]; then
-    read -r -p "  请输入域名 [回车=沿用 ${PREV_DOMAIN}]: " DOMAIN
-    DOMAIN="${DOMAIN:-$PREV_DOMAIN}"
+    prompt DOMAIN "  请输入域名 [回车=沿用 ${PREV_DOMAIN}]: " "$PREV_DOMAIN"
   else
-    read -r -p "  请输入域名 (例如 pay.example.com): " DOMAIN
+    if has_tty; then
+      prompt DOMAIN "  请输入域名 (例如 pay.example.com): " ""
+    else
+      die "非交互安装必须提供域名: bash install.sh pay.example.com"
+    fi
   fi
 fi
 [[ -n "$DOMAIN" ]] || die "域名不能为空"
 DOMAIN="${DOMAIN#http://}"; DOMAIN="${DOMAIN#https://}"; DOMAIN="${DOMAIN%%/*}"
+
+if ! has_tty; then
+  info "非交互模式（无 TTY，如 curl|bash）→ 使用默认选项（HTTPS=是，随机管理员密码）"
+fi
 
 # Detect reinstall / existing assets up front
 REUSE_DB=0
@@ -392,6 +461,26 @@ REUSE_CFG=0
 REUSE_CERT=0
 [[ -f "${INSTALL_DIR}/data/giftcard.db" ]] && REUSE_DB=1
 [[ -f "${INSTALL_DIR}/configs/config.yaml" ]] && REUSE_CFG=1
+# Broken leftover config must not be reused (common after failed first install / curl|bash pollution)
+if [[ "$REUSE_CFG" -eq 1 ]]; then
+  CFG_BROKEN=0
+  if ! config_is_valid "${INSTALL_DIR}/configs/config.yaml"; then
+    CFG_BROKEN=1
+  elif systemctl is-failed --quiet "${SERVICE_NAME}" 2>/dev/null \
+    || ! systemctl is-active --quiet "${SERVICE_NAME}" 2>/dev/null; then
+    # Service never came up after previous install — check logs for YAML load errors
+    if journalctl -u "${SERVICE_NAME}" -n 50 --no-pager 2>/dev/null \
+      | grep -qE 'load config|did not find expected key|yaml:'; then
+      CFG_BROKEN=1
+    fi
+  fi
+  if [[ "$CFG_BROKEN" -eq 1 ]]; then
+    warn "已有 config.yaml 无效或曾导致启动失败，将重新生成（原文件备份为 .broken）"
+    mv -f "${INSTALL_DIR}/configs/config.yaml" \
+      "${INSTALL_DIR}/configs/config.yaml.broken.$(date +%s)" 2>/dev/null || true
+    REUSE_CFG=0
+  fi
+fi
 has_valid_cert "$DOMAIN" && REUSE_CERT=1
 
 echo ""
@@ -421,8 +510,7 @@ echo ""
 FORCE_RENEW=0
 if [[ "$REUSE_CERT" -eq 1 ]]; then
   info "已有有效证书，默认跳过 certbot 申请"
-  read -r -p "  是否强制重新申请证书？ [y/N]: " FORCE_SSL
-  FORCE_SSL="${FORCE_SSL:-N}"
+  prompt FORCE_SSL "  是否强制重新申请证书？ [y/N]: " "N"
   if [[ "${FORCE_SSL,,}" == "y" || "${FORCE_SSL,,}" == "yes" ]]; then
     WANT_SSL="Y"
     REUSE_CERT=0
@@ -432,7 +520,7 @@ if [[ "$REUSE_CERT" -eq 1 ]]; then
     WANT_SSL="reuse"
   fi
 else
-  read -r -p "  是否申请 Let's Encrypt HTTPS？ [Y/n]: " WANT_SSL
+  prompt WANT_SSL "  是否申请 Let's Encrypt HTTPS？ [Y/n]: " "Y"
   WANT_SSL="${WANT_SSL:-Y}"
 fi
 
@@ -443,9 +531,14 @@ ADMIN_TOKEN=""
 JWT_SECRET=""
 API_SECRET=""
 if [[ "$REUSE_CFG" -eq 0 ]]; then
-  read -r -p "  管理员用户名 [admin]: " ADMIN_USER
+  prompt ADMIN_USER "  管理员用户名 [admin]: " "admin"
   ADMIN_USER="${ADMIN_USER:-admin}"
-  read -r -p "  管理员密码 [回车=随机生成]: " ADMIN_PASS
+  # Sanitize username: only allow simple identifiers for YAML safety
+  if [[ ! "$ADMIN_USER" =~ ^[A-Za-z0-9_.@-]+$ ]]; then
+    warn "管理员用户名含非法字符，回退为 admin"
+    ADMIN_USER="admin"
+  fi
+  prompt ADMIN_PASS "  管理员密码 [回车=随机生成]: " ""
   if [[ -z "$ADMIN_PASS" ]]; then
     ADMIN_PASS="$(rand_hex 8)"
     info "已生成随机管理员密码"
@@ -586,56 +679,82 @@ EOF
   ok "部署说明已更新（未重置密码）"
 else
   info "生成全新 config.yaml 与部署说明 …"
-  cat > "$CFG" <<EOF
-# NexusCard production config (minimal).
-# Configure Alipay keys in Admin UI -> Payment (hot reload).
+  # Build YAML with properly quoted scalars (avoids breakages from special chars / curl|bash pollution)
+  {
+    echo "# NexusCard production config (minimal)."
+    echo "# Configure Alipay / Epay keys in Admin UI -> Payment (hot reload)."
+    echo ""
+    echo "server:"
+    echo "  listen: $(yaml_quote "127.0.0.1:${LISTEN_PORT}")"
+    echo "  public_base_url: $(yaml_quote "${PUBLIC_URL}")"
+    echo "  admin_token: $(yaml_quote "${ADMIN_TOKEN}")"
+    echo ""
+    echo "db:"
+    echo "  driver: sqlite"
+    echo "  dsn: $(yaml_quote "${INSTALL_DIR}/data/giftcard.db")"
+    echo ""
+    echo "alipay:"
+    echo "  mock_pay: true"
+    echo "  bill_subject: $(yaml_quote "Digital Goods")"
+    echo "  is_production: false"
+    echo "  product: page"
+    echo "  timeout_express: $(yaml_quote "30m")"
+    echo ""
+    echo "epay:"
+    echo "  enabled: false"
+    echo "  api_url: $(yaml_quote "")"
+    echo "  pid: $(yaml_quote "")"
+    echo "  key: $(yaml_quote "")"
+    echo "  types: $(yaml_quote "alipay,wxpay")"
+    echo "  name: $(yaml_quote "Digital Goods")"
+    echo ""
+    echo "notify_worker:"
+    echo "  max_attempts: 12"
+    echo "  base_backoff_sec: 5"
+    echo "  poll_interval_sec: 2"
+    echo ""
+    echo "expire_worker:"
+    echo "  interval_sec: 15"
+    echo "  batch_size: 100"
+    echo ""
+    echo "security:"
+    echo "  sign_skew_sec: 300"
+    echo "  https_only: true"
+    echo "  ssrf_block_private_ip: true"
+    echo ""
+    echo "seed_merchant:"
+    echo "  app_id: $(yaml_quote "k2-main")"
+    echo "  name: $(yaml_quote "K2Board")"
+    echo "  api_secret: $(yaml_quote "${API_SECRET}")"
+    echo ""
+    echo "admin:"
+    echo "  username: $(yaml_quote "${ADMIN_USER}")"
+    echo "  password: $(yaml_quote "${ADMIN_PASS}")"
+    echo "  jwt_secret: $(yaml_quote "${JWT_SECRET}")"
+    echo "  site_name: $(yaml_quote "NexusCard")"
+    echo ""
+    echo "shop:"
+    echo "  title: $(yaml_quote "NexusCard Store")"
+    echo "  subtitle: $(yaml_quote "US Apple ID · App Store cards · Google / Netflix · Data plans · Instant delivery")"
+    echo "  order_ttl_min: 30"
+  } > "$CFG"
 
-server:
-  listen: "127.0.0.1:${LISTEN_PORT}"
-  public_base_url: "${PUBLIC_URL}"
-  admin_token: "${ADMIN_TOKEN}"
-
-db:
-  driver: sqlite
-  dsn: "${INSTALL_DIR}/data/giftcard.db"
-
-alipay:
-  mock_pay: true
-  bill_subject: "Digital Goods"
-  is_production: false
-  product: "page"
-  timeout_express: "30m"
-
-notify_worker:
-  max_attempts: 12
-  base_backoff_sec: 5
-  poll_interval_sec: 2
-
-expire_worker:
-  interval_sec: 15
-  batch_size: 100
-
-security:
-  sign_skew_sec: 300
-  https_only: true
-  ssrf_block_private_ip: true
-
-seed_merchant:
-  app_id: "k2-main"
-  name: "K2Board"
-  api_secret: "${API_SECRET}"
-
-admin:
-  username: "${ADMIN_USER}"
-  password: "${ADMIN_PASS}"
-  jwt_secret: "${JWT_SECRET}"
-  site_name: "NexusCard"
-
-shop:
-  title: "NexusCard Store"
-  subtitle: "US Apple ID · App Store cards · Google / Netflix · Data plans · Instant delivery"
-  order_ttl_min: 30
-EOF
+  # Prefer binary validation once the release binary is on disk (step 3 runs before this)
+  if [[ -x "${INSTALL_DIR}/${BIN_NAME}" ]]; then
+    if ! "${INSTALL_DIR}/${BIN_NAME}" -check-config -config "$CFG" >/dev/null 2>&1; then
+      # v1.1.1+ supports -check-config; older binaries error on unknown flag — fall back
+      if "${INSTALL_DIR}/${BIN_NAME}" -h 2>&1 | grep -q 'check-config'; then
+        fail "生成的 config.yaml 校验失败，内容预览:"
+        nl -ba "$CFG" | head -60 || true
+        die "配置写入异常，请重试或到 GitHub 提 issue"
+      fi
+    fi
+  fi
+  if ! config_is_valid "$CFG"; then
+    fail "生成的 config.yaml 校验失败，内容预览:"
+    nl -ba "$CFG" | head -60 || true
+    die "配置写入异常，请重试或到 GitHub 提 issue"
+  fi
 
   cat > "${INSTALL_DIR}/README-DEPLOY.txt" <<EOF
 NexusCard deployment info
