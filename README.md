@@ -13,7 +13,7 @@ bash <(curl -fsSL https://raw.githubusercontent.com/HenZenKuriRIP/NexusCard/main
 固定版本：
 
 ```bash
-VERSION=v1.1.1 bash <(curl -fsSL https://raw.githubusercontent.com/HenZenKuriRIP/NexusCard/main/deploy/install.sh) \
+VERSION=v1.1.2 bash <(curl -fsSL https://raw.githubusercontent.com/HenZenKuriRIP/NexusCard/main/deploy/install.sh) \
   pay.example.com
 ```
 

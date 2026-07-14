@@ -62,7 +62,8 @@ func (s *SettingsService) GetAlipay() AlipaySettings {
 		Enabled:         true,
 	}
 	var row models.SiteSetting
-	if err := s.DB.Where("key = ?", settingKeyAlipay).First(&row).Error; err != nil {
+	// Find (not First): missing row is normal before Admin saves payment config.
+	if err := s.DB.Where("key = ?", settingKeyAlipay).Limit(1).Find(&row).Error; err != nil || row.Key == "" {
 		return out
 	}
 	var dbv AlipaySettings
@@ -180,7 +181,8 @@ func (s *SettingsService) GetEpay() EpaySettings {
 		out.Name = "Digital Goods"
 	}
 	var row models.SiteSetting
-	if err := s.DB.Where("key = ?", settingKeyEpay).First(&row).Error; err != nil {
+	// Find (not First): missing row is normal before Admin saves epay config.
+	if err := s.DB.Where("key = ?", settingKeyEpay).Limit(1).Find(&row).Error; err != nil || row.Key == "" {
 		return out
 	}
 	var dbv EpaySettings

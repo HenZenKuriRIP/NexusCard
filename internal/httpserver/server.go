@@ -80,10 +80,11 @@ func (s *Server) reloadAlipayLocked() {
 	if !view["effective_enabled"].(bool) {
 		s.Alipay = nil
 		s.Orders.Alipay = nil
+		// Expected on fresh install; summary also printed at listen line.
 		if acfg.MockPay {
-			slog.Info("alipay real-pay off; mock_pay on")
+			slog.Debug("alipay real-pay off; mock_pay on")
 		} else {
-			slog.Info("alipay not ready — configure in Admin -> Payment")
+			slog.Debug("alipay not ready — configure in Admin -> Payment")
 		}
 		return
 	}
@@ -119,10 +120,11 @@ func (s *Server) reloadEpayLocked() {
 	view := s.Settings.EpayPublicView()
 	if !view["effective_enabled"].(bool) {
 		s.Epay = nil
+		// Expected until Admin enables 彩虹易支付; avoid noisy start logs.
 		if ecfg.Enabled {
-			slog.Info("epay not ready — configure api_url / pid / key in Admin -> Payment")
+			slog.Debug("epay not ready — configure api_url / pid / key in Admin -> Payment")
 		} else {
-			slog.Info("epay disabled")
+			slog.Debug("epay disabled")
 		}
 		return
 	}

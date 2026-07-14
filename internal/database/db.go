@@ -2,9 +2,11 @@ package database
 
 import (
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/glebarez/sqlite"
 	"gorm.io/driver/mysql"
@@ -20,9 +22,13 @@ func Open(cfg *config.Config) (*gorm.DB, error) {
 	switch strings.ToLower(cfg.DB.Driver) {
 	case "sqlite", "sqlite3", "":
 		if dir := filepath.Dir(cfg.DB.DSN); dir != "." && dir != "" {
-			_ = os.MkdirAll(dir, 0o755)
+			if err := os.MkdirAll(dir, 0o755); err != nil {
+				return nil, fmt.Errorf("create db dir %s: %w", dir, err)
+			}
 		} else {
-			_ = os.MkdirAll("data", 0o755)
+			if err := os.MkdirAll("data", 0o755); err != nil {
+				return nil, fmt.Errorf("create data dir: %w", err)
+			}
 		}
 		dialector = sqlite.Open(cfg.DB.DSN)
 	case "mysql":
@@ -31,8 +37,20 @@ func Open(cfg *config.Config) (*gorm.DB, error) {
 		return nil, fmt.Errorf("unsupported db driver %q", cfg.DB.Driver)
 	}
 
+	// IgnoreRecordNotFoundError: missing optional rows (e.g. site_settings) is normal.
+	// Colorful + "\r\n" prefix causes blank/noisy lines under systemd journal.
+	gormLog := logger.New(
+		log.New(os.Stdout, "", log.LstdFlags),
+		logger.Config{
+			SlowThreshold:             200 * time.Millisecond,
+			LogLevel:                  logger.Warn,
+			IgnoreRecordNotFoundError: true,
+			Colorful:                  false,
+		},
+	)
+
 	db, err := gorm.Open(dialector, &gorm.Config{
-		Logger: logger.Default.LogMode(logger.Warn),
+		Logger: gormLog,
 	})
 	if err != nil {
 		return nil, err
