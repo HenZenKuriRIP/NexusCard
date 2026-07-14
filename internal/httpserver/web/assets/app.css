@@ -129,7 +129,7 @@ label { display:block; color: var(--muted); font-size: 12px; margin-bottom: 6px;
 .muted { color: var(--muted); }
 .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
 
-/* ===== Commercial shop (NexusCard) ===== */
+/* ===== Commercial shop (卡卡基地) ===== */
 body.shop {
   --bg0: #f6f7fb;
   --ink: #0b1220;

@@ -35,6 +35,15 @@ function route() {
 let __cfg = null;
 let __cats = [];
 
+/** 品牌名：去掉旧 NexusCard Store 等英文，统一展示卡卡基地 */
+function brandName(cfg) {
+  const raw = String((cfg && (cfg.site_name || cfg.title)) || '').trim();
+  if (!raw) return '卡卡基地';
+  const low = raw.toLowerCase();
+  if (low.includes('nexuscard') || low === 'giftcard' || low === 'giftcard store') return '卡卡基地';
+  return raw;
+}
+
 async function boot() {
   document.body.className = 'shop';
   window.addEventListener('hashchange', render);
@@ -43,24 +52,25 @@ async function boot() {
     const cr = await api('/categories');
     __cats = cr.categories || [];
   } catch (e) {
-    __cfg = { title: '卡卡基地', subtitle: '' };
+    __cfg = { title: '卡卡基地', site_name: '卡卡基地', subtitle: '' };
   }
-  document.title = (__cfg.title || '卡卡基地') + ' · 数字商品商城';
+  const brand = brandName(__cfg);
+  document.title = brand;
   await render();
 }
 
 function shell(inner, activeCat) {
+  const brand = brandName(__cfg);
   const navCats = __cats.slice(0, 6).map(c =>
     `<a class="nav-link ${activeCat === c.code ? 'on' : ''}" href="#/?c=${esc(c.code)}">${esc(c.name)}</a>`
   ).join('');
   $('#app').innerHTML = `
  <header class="nx-top">
  <div class="nx-top-inner">
- <a class="nx-logo" href="#/">
- <span class="nx-mark">N</span>
- <span>
- <b>${esc(__cfg.title || '卡卡基地')}</b>
- <small>数字商品商城</small>
+ <a class="nx-logo" href="#/" title="${esc(brand)}">
+ <span class="nx-mark">卡</span>
+ <span class="nx-brand">
+ <b>${esc(brand)}</b>
  </span>
  </a>
  <nav class="nx-nav">
@@ -73,7 +83,7 @@ function shell(inner, activeCat) {
  <footer class="nx-foot">
  <div class="nx-foot-inner">
  <div>
- <b>${esc(__cfg.site_name || __cfg.title || '卡卡基地')}</b>
+ <b>${esc(brand)}</b>
  <p>支付成功后自动发货</p>
  </div>
  <div class="nx-foot-meta">
@@ -111,8 +121,8 @@ async function homePage(cat) {
  <span class="pill soft">美区账号</span>
  <span class="pill soft">流媒体</span>
  </div>
- <h1>${esc(__cfg.title || '数字商品商城')}</h1>
- <p>${esc(__cfg.subtitle || '')}</p>
+ <h1>${esc(brandName(__cfg))}</h1>
+ <p>${esc((__cfg && __cfg.subtitle) || '美区 Apple ID · 礼品卡 · 流媒体 · 软件账号 · 自动发货')}</p>
  <ul class="hero-points">${feats}</ul>
  <div class="hero-cta">
  <a class="btn primary lg" href="#grid">浏览商品</a>

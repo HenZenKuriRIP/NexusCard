@@ -221,9 +221,11 @@ func (c *Config) applyDefaults() {
 	if c.Admin.SiteName == "" {
 		c.Admin.SiteName = "卡卡基地"
 	}
+	c.Admin.SiteName = normalizeBrandName(c.Admin.SiteName)
 	if c.Shop.Title == "" {
 		c.Shop.Title = c.Admin.SiteName
 	}
+	c.Shop.Title = normalizeBrandName(c.Shop.Title)
 	if c.Shop.Subtitle == "" {
 		c.Shop.Subtitle = "美区 Apple ID · 礼品卡 · Netflix / Google · 软件账号 · 自动发货"
 	}
@@ -253,6 +255,23 @@ func (c *Config) validate() error {
 		return fmt.Errorf("alipay.mock_pay must be false when is_production=true")
 	}
 	return nil
+}
+
+// normalizeBrandName rewrites legacy English brand strings to 卡卡基地.
+func normalizeBrandName(s string) string {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return "卡卡基地"
+	}
+	low := strings.ToLower(s)
+	switch {
+	case low == "nexuscard", low == "nexuscard store", low == "giftcard", low == "giftcard store":
+		return "卡卡基地"
+	case strings.Contains(low, "nexuscard"):
+		return "卡卡基地"
+	default:
+		return s
+	}
 }
 
 func (c *Config) NotifyPollInterval() time.Duration {

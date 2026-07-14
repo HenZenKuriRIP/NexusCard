@@ -80,7 +80,8 @@ async function app() {
   try {
     const r = await api('/auth/me');
     me = r.user || me;
-    window.__site = r.site_name || '卡卡基地';
+    const raw = r.site_name || '卡卡基地';
+    window.__site = /nexuscard/i.test(raw) ? '卡卡基地' : raw;
   } catch {
     setToken('');
     location.hash = '#/login';
@@ -90,7 +91,7 @@ async function app() {
     <div class="admin-layout">
       <aside class="sidebar">
         <div class="brand">
-          <div class="brand-mark">N</div>
+          <div class="brand-mark">卡</div>
           <div>
             <h1>${esc(window.__site || '卡卡基地')}</h1>
             <p>管理后台</p>
